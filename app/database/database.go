@@ -2,7 +2,7 @@ package database
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,25 +13,28 @@ var DB *pgxpool.Pool
 func Connect() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		log.Fatal("DATABASE_URL environment variable is not set")
+		slog.Error("DATABASE_URL environment variable is not set")
+		os.Exit(1)
 	}
 
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		slog.Error("Unable to connect to database", "error", err)
+		os.Exit(1)
 	}
 
 	if err := pool.Ping(context.Background()); err != nil {
-		log.Fatalf("Database ping failed: %v\n", err)
+		slog.Error("Database ping failed", "error", err)
+		os.Exit(1)
 	}
 
 	DB = pool
-	log.Println("✅ Connected to Supabase (PostgreSQL) successfully!")
+	slog.Info("Connected to Supabase (PostgreSQL) successfully")
 }
 
 func Close() {
 	if DB != nil {
 		DB.Close()
-		log.Println("Database connection closed.")
+		slog.Info("Database connection closed")
 	}
 }
