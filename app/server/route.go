@@ -17,6 +17,7 @@ func registerRoutes(r *gin.Engine) {
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
+		AllowOrigins:     []string{"*"},
 	}))
 
 	r.Use(ErrorHandler())
