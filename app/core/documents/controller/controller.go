@@ -1,16 +1,27 @@
 package controller
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/arya-bhanu/go-doc-generator/constants"
+	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 )
 
-func CreateGoogleFormController(c *gin.Context) {
+// Handler holds the service dependencies for document controllers.
+type Handler struct {
+	DocService *docsvc.DocumentService
+}
+
+// NewHandler constructs a Handler with the given DocumentService.
+func NewHandler(docService *docsvc.DocumentService) *Handler {
+	return &Handler{DocService: docService}
+}
+
+// CreateGoogleFormController binds the request payload, calls ProcessDocuments
+// via the injected DocumentService, and returns the fetched document files.
+func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	var payload CreateFormPayload
 
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -19,6 +30,12 @@ func CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	fmt.Println(c.Get(constants.UserEmailContextKey))
+	docTitles, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
+	if err != nil {
+		slog.Error("failed to process documents", "err", err.Error())
+		c.Error(err)
+		return
+	}
 
+	c.JSON(http.StatusOK, gin.H{"document_titles": docTitles})
 }

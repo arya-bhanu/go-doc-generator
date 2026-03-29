@@ -1,5 +1,5 @@
 package controller
 
 type CreateFormPayload struct {
-	FormIDS []string `json:"form_ids" binding:"required"`
+	DocIDS []string `json:"doc_ids" binding:"required"`
 }

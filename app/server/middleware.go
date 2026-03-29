@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
+	usersrepo "github.com/arya-bhanu/go-doc-generator/app/core/users/repository"
 	"github.com/arya-bhanu/go-doc-generator/constants"
 	httpresponsewrapper "github.com/arya-bhanu/go-doc-generator/utils/http_response_wrapper"
 )
@@ -122,6 +124,24 @@ func AuthMiddleware(keySet jwk.Set, issuer string) gin.HandlerFunc {
 		}
 
 		c.Set(constants.UserEmailContextKey, emailStr)
+
+		// ── 4. Look up the authenticated user in ops_user table ───────────────
+		userOps, err := usersrepo.GetUserWithEmail(emailStr)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "user not found in ops_user",
+				})
+				return
+			}
+			slog.Error("failed to query ops_user", "err", err.Error())
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error while fetching user",
+			})
+			return
+		}
+
+		c.Set(constants.UserOpsContextKey, userOps)
 		c.Next()
 	}
 }

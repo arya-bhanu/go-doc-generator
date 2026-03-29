@@ -15,7 +15,7 @@ import (
 	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
 )
 
-func registerRoutes(r *gin.Engine) {
+func registerRoutes(r *gin.Engine, handler *ctr.Handler) {
 	r.Use(cors.New(cors.Config{
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-App-Identity"},
@@ -69,7 +69,7 @@ func registerRoutes(r *gin.Engine) {
 	{
 		customer := api.Group("/customer")
 		{
-			customer.POST("/create-form", ctr.CreateGoogleFormController)
+			customer.POST("/create-form", handler.CreateGoogleFormController)
 		}
 	}
 }

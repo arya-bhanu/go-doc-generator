@@ -5,9 +5,11 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+
+	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
 )
 
-func Start() {
+func Start(handler *ctr.Handler) {
 	port := os.Getenv("APP_PORT")
 	if port == "" {
 		port = "8080"
@@ -15,7 +17,7 @@ func Start() {
 
 	r := gin.Default()
 
-	registerRoutes(r)
+	registerRoutes(r, handler)
 
 	slog.Info("Starting server", "port", port)
 	if err := r.Run(":" + port); err != nil {

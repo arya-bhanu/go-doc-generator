@@ -9,12 +9,17 @@ import (
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/forms/v1"
 
+	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
+	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
+	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	"github.com/arya-bhanu/go-doc-generator/app/database"
 	googleapi "github.com/arya-bhanu/go-doc-generator/app/google_api"
 	"github.com/arya-bhanu/go-doc-generator/app/server"
 	logwrapper "github.com/arya-bhanu/go-doc-generator/utils/log_wrapper"
 )
 
+// AppServices holds external service clients that require their own
+// configuration (credentials, connection pools, etc.).
 type AppServices struct {
 	SupabaseDBService *pgxpool.Pool
 	GdriveService     *drive.Service
@@ -24,6 +29,7 @@ type AppServices struct {
 var (
 	ctx         = context.Background()
 	appServices AppServices
+	docService  *docsvc.DocumentService
 )
 
 func main() {
@@ -49,6 +55,9 @@ func main() {
 		GFormService:      gformService,
 	}
 
+	gdriveRepo := docrepo.NewGDriveRepo(appServices.GdriveService)
+	docService = docsvc.NewDocumentService(gdriveRepo)
+
 	if err != nil {
 		slog.Error("error init google api services", "err", err.Error())
 		return
@@ -57,5 +66,6 @@ func main() {
 	slog.Info("connected to gdriveService")
 	slog.Info("connected to gformService")
 
-	server.Start()
+	handler := ctr.NewHandler(docService)
+	server.Start(handler)
 }
