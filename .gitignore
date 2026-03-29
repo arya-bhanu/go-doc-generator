@@ -1,3 +1,5 @@
 .env
 service-account.json
 store.log
+vendor
+temp

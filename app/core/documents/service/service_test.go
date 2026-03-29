@@ -14,10 +14,8 @@ import (
 	googleapi "github.com/arya-bhanu/go-doc-generator/app/google_api"
 )
 
-// driveFileID is the Google Drive file we want to verify access to.
 const driveFileID = "1DfaDlEM21aGggs5EnmzwLAuNpFNBswnW"
 
-// AppServices mirrors the service registry assembled in cmd/main.go.
 type AppServices struct {
 	SupabaseDBService *pgxpool.Pool
 	GdriveService     *drive.Service

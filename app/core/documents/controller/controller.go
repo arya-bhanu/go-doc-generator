@@ -9,18 +9,14 @@ import (
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 )
 
-// Handler holds the service dependencies for document controllers.
 type Handler struct {
 	DocService *docsvc.DocumentService
 }
 
-// NewHandler constructs a Handler with the given DocumentService.
 func NewHandler(docService *docsvc.DocumentService) *Handler {
 	return &Handler{DocService: docService}
 }
 
-// CreateGoogleFormController binds the request payload, calls ProcessDocuments
-// via the injected DocumentService, and returns the fetched document files.
 func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	var payload CreateFormPayload
 

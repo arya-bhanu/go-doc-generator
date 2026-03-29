@@ -3,76 +3,138 @@ package service
 import (
 	"archive/zip"
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
 	documents "github.com/arya-bhanu/go-doc-generator/app/core/documents"
+	"github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	"github.com/arya-bhanu/go-doc-generator/app/core/users"
 	"github.com/arya-bhanu/go-doc-generator/constants"
 )
 
-// Pre-compiled regexes for template variable patterns.
 var (
-	// curlyVarRe matches {variable} in raw XML text.
+	// xmlTagRe strips XML tags AND any surrounding whitespace so that text split
+	// across multiple <w:t> runs is concatenated without gaps.
+	// e.g.  &lt;NO_H</w:t>\n  <w:t>P&gt;  →  &lt;NO_HP&gt;
+	xmlTagRe = regexp.MustCompile(`\s*<[^>]+>\s*`)
+
+	// curlyVarRe matches {variable} in the collapsed plain-text content.
 	curlyVarRe = regexp.MustCompile(`\{([^}]+)\}`)
 
-	// angleVarRe matches <variable> patterns that are XML-encoded as &lt;...&gt;
-	// inside a .docx word/document.xml file.
-	// Only pure alphanumeric identifiers (letters, digits, underscores) are matched
-	// to avoid capturing XML tags such as &lt;w:bCs w:val="0"/&gt;.
+	// angleVarRe matches <variable> patterns after XML tags have been stripped.
+	// The &lt; / &gt; entities remain in the collapsed text, so we still look for
+	// them — but now across run boundaries. Only pure alphanumeric identifiers
+	// (letters, digits, underscores) are accepted to avoid XML attribute noise.
 	angleVarRe = regexp.MustCompile(`&lt;([A-Za-z0-9_]+)&gt;`)
 )
 
-// DocumentService holds the repositories needed for document business logic.
 type DocumentService struct {
 	GDriveRepo docrepo.GDriveRepository
 }
 
-// NewDocumentService constructs a DocumentService with the provided GDrive repository.
 func NewDocumentService(gdriveRepo docrepo.GDriveRepository) *DocumentService {
 	return &DocumentService{GDriveRepo: gdriveRepo}
 }
 
 func fetchDocumentVariables() {}
 
-// fetchDocumentTemplates fetches documents from Google Drive, saves each one
-// to a temp file named "<uuidv6>_<original-name>.docx", and returns the
-// resulting DocumentFile slice.
 func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.DocumentFile, error) {
 	return s.GDriveRepo.FetchDocuments(docIDs)
 }
 
-// ProcessDocuments retrieves the authenticated operator from the Gin context,
-// downloads all requested document templates, scans each one for template
-// variables, and returns the resulting DocumentFile slice.
 func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) ([]string, error) {
 	userctx, exist := c.Get(constants.UserOpsContextKey)
-	var docTitles []string
 	if !exist {
 		return nil, nil
 	}
 
 	userOps := userctx.(users.UserOps)
-	_ = userOps // available for logging / auth checks in future steps
 
 	docs, err := s.fetchDocumentTemplates(docIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	storedVariables := make(map[string]documents.DocumentVariable)
-	for _, doc := range docs {
-		docTitles = append(docTitles, doc.Title)
-		s.scanDocument(doc.Data, storedVariables)
+	docDetails := make([]documents.DocumentDetail, len(docs))
+	docTitles := make([]string, len(docs))
+	for i, doc := range docs {
+		docDetails[i] = documents.DocumentDetail{
+			DocTempTitle: doc.Title,
+			DocID:        docIDs[i],
+		}
+		docTitles[i] = doc.Title
 	}
 
-	fmt.Println(storedVariables)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
-	return docTitles, nil
+	storedCustVariables := make(map[string]*documents.DocumentVariable)
+	custVariables := make(map[string]*documents.DocumentVariable)
+	custVarChan := make(chan string)
+	storedUserOpsVariables := make(map[string]*documents.DocumentVariable)
+	userOpsVariables := make(map[string]*documents.DocumentVariable)
+	userOpsVarChan := make(chan string)
+
+	for _, doc := range docs {
+		s.scanDocument(doc.Data, storedCustVariables, storedUserOpsVariables)
+	}
+
+	go func() {
+		defer close(custVarChan)
+		for key := range storedCustVariables {
+			custVarChan <- key
+		}
+	}()
+
+	go func() {
+		defer close(userOpsVarChan)
+		for key := range storedUserOpsVariables {
+			userOpsVarChan <- key
+		}
+	}()
+
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for key := range custVarChan {
+				res := repository.FetchDocVariable(key)
+				mu.Lock()
+				custVariables[key] = res
+				mu.Unlock()
+			}
+		}()
+	}
+
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for key := range userOpsVarChan {
+				res := repository.FetchDocVariable(key)
+				mu.Lock()
+				userOpsVariables[key] = res
+				mu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	payload := documents.FormSessions{
+		DocDetails:       docDetails,
+		FormLink:         "",
+		FormScaffoldCust: custVariables,
+		FormScaffoldOps:  userOpsVariables,
+		UserID:           userOps.ID,
+	}
+
+	err = s.createSession(payload)
+	return docTitles, err
 }
 
 // scanDocument scans the raw .docx bytes for template variable placeholders.
@@ -86,8 +148,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) ([]s
 // Each unique match is stored in storedVariables as a key with a default
 // documents.DocumentVariable{} value. Existing keys are left unchanged so that
 // variables discovered earlier are not overwritten.
-func (s *DocumentService) scanDocument(doc []byte, storedVariables map[string]documents.DocumentVariable) {
-	// Open the .docx ZIP archive from the in-memory bytes.
+func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[string]*documents.DocumentVariable, storedUserOpsVariables map[string]*documents.DocumentVariable) {
 	r, err := zip.NewReader(bytes.NewReader(doc), int64(len(doc)))
 	if err != nil {
 		return
@@ -108,20 +169,20 @@ func (s *DocumentService) scanDocument(doc []byte, storedVariables map[string]do
 			return
 		}
 
-		xmlStr := string(xmlData)
+		collapsed := xmlTagRe.ReplaceAllString(string(xmlData), "")
 
 		// ── {variable} patterns ───────────────────────────────────────────────
-		for _, match := range curlyVarRe.FindAllString(xmlStr, -1) {
-			if _, exists := storedVariables[match]; !exists {
-				storedVariables[match] = documents.DocumentVariable{}
+		for _, match := range curlyVarRe.FindAllString(collapsed, -1) {
+			if _, exists := storedUserOpsVariables[match]; !exists {
+				storedUserOpsVariables[match] = nil
 			}
 		}
 
 		// ── <variable> patterns (stored as &lt;variable&gt; inside XML) ──────
-		for _, sub := range angleVarRe.FindAllStringSubmatch(xmlStr, -1) {
+		for _, sub := range angleVarRe.FindAllStringSubmatch(collapsed, -1) {
 			key := "<" + sub[1] + ">"
-			if _, exists := storedVariables[key]; !exists {
-				storedVariables[key] = documents.DocumentVariable{}
+			if _, exists := storedCustVariables[key]; !exists {
+				storedCustVariables[key] = nil
 			}
 		}
 
@@ -131,9 +192,12 @@ func (s *DocumentService) scanDocument(doc []byte, storedVariables map[string]do
 
 func sendDocuments() {}
 
-func createCustomerSession() {}
-
-func createUserOpsSession() {}
+func (s *DocumentService) createSession(payload documents.FormSessions) error {
+	if err := docrepo.CreateFormSessions(payload); err != nil {
+		return err
+	}
+	return nil
+}
 
 func updateCustomerSession() {}
 
