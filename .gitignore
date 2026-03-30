@@ -3,3 +3,5 @@ service-account.json
 store.log
 vendor
 temp
+oauth-client-secret.json
+token.json
