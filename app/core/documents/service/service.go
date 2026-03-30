@@ -3,6 +3,7 @@ package service
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"io"
 	"regexp"
 	"sync"
@@ -46,17 +47,17 @@ func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.Doc
 	return s.GDriveRepo.FetchDocuments(docIDs)
 }
 
-func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) ([]string, error) {
+func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]*documents.DocumentVariable, documents.FormSessions, error) {
 	userctx, exist := c.Get(constants.UserOpsContextKey)
 	if !exist {
-		return nil, nil
+		return nil, nil, documents.FormSessions{}, errors.New("user not exist")
 	}
 
 	userOps := userctx.(users.UserOps)
 
 	docs, err := s.fetchDocumentTemplates(docIDs)
 	if err != nil {
-		return nil, err
+		return nil, nil, documents.FormSessions{}, err
 	}
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
@@ -133,8 +134,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) ([]s
 		UserID:           userOps.ID,
 	}
 
-	err = s.createSession(payload)
-	return docTitles, err
+	return custVariables, userOpsVariables, payload, err
 }
 
 // scanDocument scans the raw .docx bytes for template variable placeholders.
@@ -190,17 +190,9 @@ func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[strin
 	}
 }
 
-func sendDocuments() {}
-
-func (s *DocumentService) createSession(payload documents.FormSessions) error {
+func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
 	if err := docrepo.CreateFormSessions(payload); err != nil {
 		return err
 	}
 	return nil
 }
-
-func updateCustomerSession() {}
-
-func updateUserOpsSession() {}
-
-func deleteCustomerSession() {}

@@ -10,6 +10,7 @@ type HttpResponse struct {
 	Err     string
 	Msg     string
 	Success bool
+	Data    any
 }
 
 func HttpResponseFunc(res HttpResponse) gin.H {

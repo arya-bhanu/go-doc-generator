@@ -12,6 +12,8 @@ import (
 	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
 	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
+	formrepo "github.com/arya-bhanu/go-doc-generator/app/core/form/repository"
+	formsvc "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
 	"github.com/arya-bhanu/go-doc-generator/app/database"
 	googleapi "github.com/arya-bhanu/go-doc-generator/app/google_api"
 	"github.com/arya-bhanu/go-doc-generator/app/server"
@@ -58,6 +60,9 @@ func main() {
 	gdriveRepo := docrepo.NewGDriveRepo(appServices.GdriveService)
 	docService = docsvc.NewDocumentService(gdriveRepo)
 
+	gFormRepo := formrepo.NewGFormRepo(appServices.GFormService)
+	formService := formsvc.NewFormService(gFormRepo)
+
 	if err != nil {
 		slog.Error("error init google api services", "err", err.Error())
 		return
@@ -66,6 +71,6 @@ func main() {
 	slog.Info("connected to gdriveService")
 	slog.Info("connected to gformService")
 
-	handler := ctr.NewHandler(docService)
+	handler := ctr.NewHandler(docService, formService)
 	server.Start(handler)
 }
