@@ -7,9 +7,10 @@ import (
 )
 
 type DocumentFile struct {
-	Title string // "<uuidv6>_<original-filename-without-ext>.docx"
-	Data  []byte
-	DocID string
+	Title         string // "<uuidv6>_<original-filename-without-ext>.docx"
+	Data          []byte
+	DocID         string
+	OriginalTitle string
 }
 
 func SaveToTemp(title string, data []byte) (string, error) {

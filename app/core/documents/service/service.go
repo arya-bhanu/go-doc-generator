@@ -75,13 +75,12 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	}
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
-	docTitles := make([]string, len(docs))
 	for i, doc := range docs {
 		docDetails[i] = documents.DocumentDetail{
-			DocTempTitle: doc.Title,
-			DocID:        docIDs[i],
+			DocTempTitle:  doc.Title,
+			DocID:         docIDs[i],
+			OriginalTitle: doc.OriginalTitle,
 		}
-		docTitles[i] = doc.Title
 	}
 
 	var wg sync.WaitGroup

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	"github.com/arya-bhanu/go-doc-generator/app/core/documents"
@@ -30,8 +29,6 @@ func CreateFormSessions(payload documents.FormSessions) error {
 	if err != nil {
 		return fmt.Errorf("supabase: marshal form_scaffold_ops: %w", err)
 	}
-
-	slog.Info("formScaffoldCustJSON", "val", string(formScaffoldCustJSON))
 
 	_, err = database.DB.Exec(
 		context.Background(),

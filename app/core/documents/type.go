@@ -13,8 +13,9 @@ type DocumentVariable struct {
 }
 
 type DocumentDetail struct {
-	DocTempTitle string `json:"doc_temp_title"`
-	DocID        string `json:"doc_id"`
+	DocTempTitle  string `json:"doc_temp_title"`
+	DocID         string `json:"doc_id"`
+	OriginalTitle string `json:"original_title"`
 }
 
 type FormSessions struct {

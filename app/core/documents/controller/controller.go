@@ -8,6 +8,7 @@ import (
 
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	formservice "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
+	formconst "github.com/arya-bhanu/go-doc-generator/constants/form_const"
 	httpresponsewrapper "github.com/arya-bhanu/go-doc-generator/utils/http_response_wrapper"
 )
 
@@ -36,13 +37,8 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	formTitle := "Document Form"
-	if len(varPayload.DocDetails) > 0 {
-		formTitle = varPayload.DocDetails[0].DocTempTitle
-	}
-
 	// this will generate a google form using google form API service
-	formLink, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formTitle, userVars)
+	formLink, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formconst.FormCustTitle, userVars)
 	if err != nil {
 		slog.Error("failed to generate google form", "err", err.Error())
 		c.Error(err)

@@ -47,10 +47,46 @@ func main() {
 	db := database.Connect(ctx)
 	defer database.Close()
 
-	err := googleapi.Init(ctx)
-	gdriveService, err := googleapi.InitGDrive(ctx)
+	// ── Google API Initialisation ─────────────────────────────────────────────
+	// Prefer OAuth user credentials (token.json) for Forms & Drive so that:
+	//   • forms.Create works (service accounts have 0 Drive quota)
+	//   • created forms are owned by the real user and can be moved to a folder
+	// Falls back to service-account credentials when token.json is absent.
+	var gformService *forms.Service
+	var gdriveService *drive.Service
 
-	gformService, err := googleapi.InitGForm(ctx)
+	oauthClient, oauthErr := googleapi.InitOAuthHTTPClient(ctx)
+	if oauthErr == nil {
+		slog.Info("using OAuth user credentials for Google APIs")
+		var err error
+		gformService, err = googleapi.InitGFormOAuth(ctx, oauthClient)
+		if err != nil {
+			slog.Error("failed to init Forms service (OAuth)", "err", err)
+			return
+		}
+		gdriveService, err = googleapi.InitGDriveOAuth(ctx, oauthClient)
+		if err != nil {
+			slog.Error("failed to init Drive service (OAuth)", "err", err)
+			return
+		}
+	} else {
+		slog.Warn("OAuth token not found, falling back to service account", "err", oauthErr)
+		if err := googleapi.Init(ctx); err != nil {
+			slog.Error("failed to init service account credentials", "err", err)
+			return
+		}
+		var err error
+		gdriveService, err = googleapi.InitGDrive(ctx)
+		if err != nil {
+			slog.Error("failed to init Drive service", "err", err)
+			return
+		}
+		gformService, err = googleapi.InitGForm(ctx)
+		if err != nil {
+			slog.Error("failed to init Forms service", "err", err)
+			return
+		}
+	}
 
 	appServices = AppServices{
 		SupabaseDBService: db,
@@ -61,13 +97,9 @@ func main() {
 	gdriveRepo := docrepo.NewGDriveRepo(appServices.GdriveService)
 	docService = docsvc.NewDocumentService(gdriveRepo)
 
-	gFormRepo := formrepo.NewGFormRepo(appServices.GFormService)
+	// Pass Drive service + folder ID so CreateForm can move forms automatically
+	gFormRepo := formrepo.NewGFormRepo(appServices.GFormService, appServices.GdriveService)
 	formService := formsvc.NewFormService(gFormRepo)
-
-	if err != nil {
-		slog.Error("error init google api services", "err", err.Error())
-		return
-	}
 
 	slog.Info("connected to gdriveService")
 	slog.Info("connected to gformService")

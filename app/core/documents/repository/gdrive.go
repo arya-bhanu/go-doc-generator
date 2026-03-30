@@ -52,7 +52,7 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 			return nil, err
 		}
 
-		result = append(result, DocumentFile{Title: title, Data: data, DocID: id})
+		result = append(result, DocumentFile{Title: title, Data: data, DocID: id, OriginalTitle: baseName})
 	}
 
 	return result, nil
