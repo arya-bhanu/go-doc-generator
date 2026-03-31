@@ -35,13 +35,14 @@ func CreateFormSessions(payload documents.FormSessions) error {
 	_, err = database.DB.Exec(
 		context.Background(),
 		`INSERT INTO form_sessions
-			(doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id)
-		 VALUES ($1, $2, $3, $4, $5)`,
+			(doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		docDetailsJSON,
 		payload.FormLink,
 		formScaffoldCustJSON,
 		formScaffoldOpsJSON,
 		payload.UserID,
+		payload.FormID,
 	)
 	if err != nil {
 		return fmt.Errorf("supabase: insert form_sessions: %w", err)

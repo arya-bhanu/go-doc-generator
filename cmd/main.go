@@ -9,6 +9,7 @@ import (
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/forms/v1"
 
+	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
 	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
@@ -70,6 +71,11 @@ func main() {
 
 	slog.Info("connected to gdriveService")
 	slog.Info("connected to gformService")
+
+	// Initialise and start the form-response watcher pooler.
+	// conpool.Init must be called after gformService is ready.
+	conpool.Init(gformService)
+	conpool.StartPooler()
 
 	handler := ctr.NewHandler(docService, formService)
 	server.Start(handler)

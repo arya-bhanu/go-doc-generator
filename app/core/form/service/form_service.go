@@ -10,18 +10,23 @@ import (
 )
 
 type FormRepository interface {
-	CreateForm(ctx context.Context, title string, items []*forms.Item) (string, error)
+	CreateForm(ctx context.Context, title string, items []*forms.Item) (GoogleFormRes, error)
 }
 
 type FormService struct {
 	repo FormRepository
 }
 
+type GoogleFormRes struct {
+	FormLink string
+	FormID   string
+}
+
 func NewFormService(repo FormRepository) *FormService {
 	return &FormService{repo: repo}
 }
 
-func (s *FormService) GenerateGoogleForm(ctx context.Context, formTitle string, vars map[string]*documents.DocumentVariable) (string, error) {
+func (s *FormService) GenerateGoogleForm(ctx context.Context, formTitle string, vars map[string]*documents.DocumentVariable) (GoogleFormRes, error) {
 	items := make([]*forms.Item, 0, len(vars))
 
 	for key := range vars {
@@ -32,26 +37,29 @@ func (s *FormService) GenerateGoogleForm(ctx context.Context, formTitle string, 
 
 		fieldLabel := docVar.Label
 
+		var docVarType string
+		if docVar.Type != nil {
+			docVarType = *docVar.Type
+		}
+
 		var item *forms.Item
 
-		switch {
-		case docVar.Type == "":
+		switch docVarType {
+		case "", formconst.ChoiceQuestionShort:
 			item = generateTextShortQuestion(fieldLabel)
-		case docVar.Type == formconst.ChoiceQuestionCheckbox:
+		case formconst.ChoiceQuestionCheckbox:
 			item = generateCheckboxQuestion(fieldLabel)
-		case docVar.Type == formconst.ChoiceQuestionRadio:
+		case formconst.ChoiceQuestionRadio:
 			item = generateRadioQuestion(fieldLabel)
-		case docVar.Type == formconst.ChoiceQuestionDropdown:
+		case formconst.ChoiceQuestionDropdown:
 			item = generateDropdownQuestion(fieldLabel)
-		case docVar.Type == formconst.ChoiceQuestionShort:
-			item = generateTextShortQuestion(fieldLabel)
-		case docVar.Type == formconst.ChoiceQuestionLong:
+		case formconst.ChoiceQuestionLong:
 			item = generateTextLongQuestion(fieldLabel)
-		case docVar.Type == formconst.ScaleQuestion:
+		case formconst.ScaleQuestion:
 			item = generateScaleQuestion(fieldLabel)
-		case docVar.Type == formconst.DateQuestion:
+		case formconst.DateQuestion:
 			item = generateDateQuestion(fieldLabel)
-		case docVar.Type == formconst.TimeQuestion:
+		case formconst.TimeQuestion:
 			item = generateTimeQuestion(fieldLabel)
 		}
 

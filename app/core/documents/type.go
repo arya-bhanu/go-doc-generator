@@ -7,8 +7,8 @@ type DocumentVariable struct {
 	Variable        string    `json:"variable"`
 	Label           string    `json:"label"`
 	CreatedAt       time.Time `json:"created_at"`
-	Description     string    `json:"description"`
-	Type            string    `json:"type,omitempty"`
+	Description     *string   `json:"description"`
+	Type            *string   `json:"type"`
 	IsFillCustomers bool      `json:"is_fill_customers"`
 }
 
@@ -23,4 +23,5 @@ type FormSessions struct {
 	FormScaffoldCust map[string]*DocumentVariable `json:"form_scaffold_cust"`
 	FormScaffoldOps  map[string]*DocumentVariable `json:"form_scaffold_ops"`
 	UserID           int                          `json:"user_id"`
+	FormID           string                       `json:"form_id"`
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	formservice "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
 	httpresponsewrapper "github.com/arya-bhanu/go-doc-generator/utils/http_response_wrapper"
@@ -50,7 +51,8 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	}
 
 	// will set the formLink into the payload
-	varPayload.FormLink = formLink
+	varPayload.FormLink = formRes.FormLink
+	varPayload.FormID = formRes.FormID
 
 	// it will inserted into supabase
 	if err = h.DocService.CreateSession(varPayload); err != nil {
@@ -59,5 +61,8 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: formLink})
+	// insert into memory for pooler
+	conpool.AddFormID(formRes.FormID)
+
+	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: formRes.FormLink})
 }
