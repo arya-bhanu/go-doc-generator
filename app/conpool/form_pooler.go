@@ -90,9 +90,33 @@ func DeleteFormID(form_session_id string, form_id string) {
 	}
 }
 
+// fetchFormIDsFromDB queries form_sessions and returns all non-empty form_ids.
+func fetchFormIDsFromDB() []string {
+	rows, err := database.DB.Query(
+		context.Background(),
+		`SELECT form_id FROM form_sessions WHERE form_id IS NOT NULL AND form_id != ''`,
+	)
+	if err != nil {
+		slog.Error("conpool: fetch form IDs from DB", "err", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var formID string
+		if err := rows.Scan(&formID); err != nil {
+			slog.Error("conpool: scan form ID", "err", err)
+			continue
+		}
+		ids = append(ids, formID)
+	}
+	return ids
+}
+
 // watchForms is the background goroutine started by StartPooler.
-// On every tick it takes a snapshot of the current form IDs and spawns one
-// goroutine per form to poll for new responses.
+// On every tick it fetches the current form IDs directly from form_sessions
+// and spawns one goroutine per form to poll for new responses.
 func watchForms() {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -100,13 +124,7 @@ func watchForms() {
 	slog.Info("conpool: form watcher started", "interval", pollInterval)
 
 	for range ticker.C {
-		mu.RLock()
-		ids := make([]string, 0, len(storeFormID))
-		for id := range storeFormID {
-			ids = append(ids, id)
-		}
-		mu.RUnlock()
-
+		ids := fetchFormIDsFromDB()
 		for _, id := range ids {
 			go pollFormResponses(id)
 		}
