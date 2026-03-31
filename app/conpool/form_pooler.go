@@ -5,8 +5,23 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/api/forms/v1"
+
 	"github.com/arya-bhanu/go-doc-generator/app/database"
 )
+
+// FormAnswer holds a single question/answer pair from a form response.
+type FormAnswer struct {
+	Question string   `json:"question"`
+	Answers  []string `json:"answers"`
+}
+
+// FormResponseResult is the clean, human-readable version of one form submission.
+type FormResponseResult struct {
+	ResponseID  string       `json:"response_id"`
+	SubmittedAt string       `json:"submitted_at"`
+	Answers     []FormAnswer `json:"answers"`
+}
 
 // FetchFormIDInit is called once at startup.  It queries the form_sessions
 // table for every non-empty form_id and loads them into the in-memory map
@@ -106,9 +121,9 @@ func watchForms() {
 	}
 }
 
-// pollFormResponses fetches the latest responses for a single form from the
-// Google Forms API and logs a summary.  Extend / replace the log call to
-// store or process responses as needed.
+// pollFormResponses fetches the form structure and all current responses for
+// a single form, pairs each answer with its question title, and logs the
+// clean result.  Replace / extend the log call to persist the data as needed.
 func pollFormResponses(formID string) {
 	if formsSvc == nil {
 		slog.Error("conpool: forms service not initialised – call conpool.Init first")
@@ -118,13 +133,102 @@ func pollFormResponses(formID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// 1. Fetch form structure to get question titles keyed by question ID.
+	form, err := formsSvc.Forms.Get(formID).Context(ctx).Do()
+	if err != nil {
+		slog.Error("conpool: get form structure", "formID", formID, "err", err)
+		return
+	}
+	questionMap := buildQuestionMap(form)
+
+	// 2. Fetch all submitted responses.
 	resp, err := formsSvc.Forms.Responses.List(formID).Context(ctx).Do()
 	if err != nil {
-		slog.Error("conpool: poll form responses", "formID", formID, "err", err)
+		slog.Error("conpool: list form responses", "formID", formID, "err", err)
 		return
 	}
 
-	slog.Info("conpool: polled form", "formID", formID, "responses", len(resp.Responses))
+	// 3. Build clean paired result.
+	results := parseResponses(questionMap, resp.Responses)
 
-	// TODO: process / persist resp.Responses as required.
+	slog.Info("conpool: polled form", "formID", formID, "responses", len(results))
+
+	// 4. Dispatch every response that hasn't been processed yet.
+	//    We hold the write lock only for the map bookkeeping, then release it
+	//    before spawning goroutines so the lock duration stays minimal.
+	if responseHandler == nil {
+		return
+	}
+
+	mu.Lock()
+	if _, ok := processedResponses[formID]; !ok {
+		processedResponses[formID] = make(map[string]struct{})
+	}
+	var fresh []FormResponseResult
+	for _, result := range results {
+		if _, seen := processedResponses[formID][result.ResponseID]; seen {
+			continue
+		}
+		processedResponses[formID][result.ResponseID] = struct{}{}
+		fresh = append(fresh, result)
+	}
+	mu.Unlock()
+
+	for _, result := range fresh {
+		captured := result // avoid closure capture of loop variable
+		go responseHandler(formID, captured.Answers)
+	}
+}
+
+// buildQuestionMap returns a map of questionID → question title by walking
+// the form's item list.  Only items that carry a QuestionItem are included.
+func buildQuestionMap(form *forms.Form) map[string]string {
+	m := make(map[string]string, len(form.Items))
+	for _, item := range form.Items {
+		if item.QuestionItem == nil || item.QuestionItem.Question == nil {
+			continue
+		}
+		qid := item.QuestionItem.Question.QuestionId
+		if qid != "" {
+			m[qid] = item.Title
+		}
+	}
+	return m
+}
+
+// parseResponses converts raw Google Forms responses into clean
+// []FormResponseResult objects where every answer is paired with its
+// question title from questionMap.
+func parseResponses(questionMap map[string]string, responses []*forms.FormResponse) []FormResponseResult {
+	results := make([]FormResponseResult, 0, len(responses))
+
+	for _, r := range responses {
+		result := FormResponseResult{
+			ResponseID:  r.ResponseId,
+			SubmittedAt: r.LastSubmittedTime,
+		}
+
+		for qid, answerObj := range r.Answers {
+			title, ok := questionMap[qid]
+			if !ok {
+				title = qid // fall back to raw ID if title not found
+			}
+
+			values := make([]string, 0)
+			if answerObj.TextAnswers != nil {
+				for _, a := range answerObj.TextAnswers.Answers {
+					values = append(values, a.Value)
+				}
+			}
+
+			result.Answers = append(result.Answers, FormAnswer{
+				Question: title,
+				Answers:  values,
+			})
+		}
+
+		results = append(results, result)
+	}
+
+	return results
 }

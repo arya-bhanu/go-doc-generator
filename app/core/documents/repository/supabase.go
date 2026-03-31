@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	"github.com/arya-bhanu/go-doc-generator/app/core/documents"
 	"github.com/arya-bhanu/go-doc-generator/app/database"
 )
@@ -46,6 +47,72 @@ func CreateFormSessions(payload documents.FormSessions) error {
 	)
 	if err != nil {
 		return fmt.Errorf("supabase: insert form_sessions: %w", err)
+	}
+
+	return nil
+}
+
+// FetchFormSession retrieves the form_sessions row whose form_id matches the
+// given value.  The JSONB columns (doc_details, form_scaffold_cust,
+// form_scaffold_ops) are decoded into their respective Go types.
+func FetchFormSession(formID string) (*documents.FormSessions, error) {
+	var (
+		session              documents.FormSessions
+		docDetailsJSON       []byte
+		formScaffoldCustJSON []byte
+		formScaffoldOpsJSON  []byte
+	)
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id
+		 FROM form_sessions
+		 WHERE form_id = $1
+		 LIMIT 1`,
+		formID,
+	).Scan(
+		&docDetailsJSON,
+		&session.FormLink,
+		&formScaffoldCustJSON,
+		&formScaffoldOpsJSON,
+		&session.UserID,
+		&session.FormID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("supabase: fetch form session %q: %w", formID, err)
+	}
+
+	if err := json.Unmarshal(docDetailsJSON, &session.DocDetails); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal doc_details: %w", err)
+	}
+	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+	}
+	if err := json.Unmarshal(formScaffoldOpsJSON, &session.FormScaffoldOps); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_ops: %w", err)
+	}
+
+	return &session, nil
+}
+
+// StoreFormFilledCustomer marshals qAndA to JSON and writes it into the
+// form_filled_customer column of the form_sessions row identified by formID.
+func StoreFormFilledCustomer(formID string, qAndA []conpool.FormAnswer) error {
+	data, err := json.Marshal(qAndA)
+	if err != nil {
+		return fmt.Errorf("supabase: marshal form_filled_customer: %w", err)
+	}
+
+	_, err = database.DB.Exec(
+		context.Background(),
+		`UPDATE form_sessions
+		 SET form_filled_customer = $1
+		 WHERE form_id = $2`,
+		data,
+		formID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: update form_filled_customer: %w", err)
 	}
 
 	return nil

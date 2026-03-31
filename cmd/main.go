@@ -74,7 +74,10 @@ func main() {
 
 	// Initialise and start the form-response watcher pooler.
 	// conpool.Init must be called after gformService is ready.
+	// SetResponseHandler must be registered before StartPooler so that no
+	// responses are missed on the very first poll tick.
 	conpool.Init(gformService)
+	conpool.SetResponseHandler(docService.GenerateDocuments)
 	conpool.StartPooler()
 
 	handler := ctr.NewHandler(docService, formService)

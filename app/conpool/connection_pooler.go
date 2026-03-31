@@ -14,6 +14,14 @@ var (
 	mu           sync.RWMutex
 	formsSvc     *forms.Service
 	pollInterval = defaultPollInterval
+
+	// responseHandler is called once per new (previously-unseen) form response.
+	// Register it with SetResponseHandler before calling StartPooler.
+	responseHandler func(formID string, qAndA []FormAnswer)
+
+	// processedResponses tracks which response IDs have already been dispatched
+	// to the handler, keyed by formID.  Guarded by mu.
+	processedResponses map[string]map[string]struct{}
 )
 
 // Init must be called once at application start-up (before StartPooler) to
@@ -23,6 +31,14 @@ var (
 func Init(svc *forms.Service) {
 	formsSvc = svc
 	storeFormID = make(map[string]any)
+	processedResponses = make(map[string]map[string]struct{})
+}
+
+// SetResponseHandler registers a callback that is invoked exactly once for
+// every new form submission.  The callback is executed in its own goroutine,
+// so it must be safe to call concurrently.  Call this before StartPooler.
+func SetResponseHandler(fn func(formID string, qAndA []FormAnswer)) {
+	responseHandler = fn
 }
 
 // StartPooler loads all existing form IDs from the database into the

@@ -4,16 +4,25 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
+	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	documents "github.com/arya-bhanu/go-doc-generator/app/core/documents"
 	"github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	"github.com/arya-bhanu/go-doc-generator/app/core/users"
+	usersrepo "github.com/arya-bhanu/go-doc-generator/app/core/users/repository"
+	"github.com/arya-bhanu/go-doc-generator/app/email"
 	"github.com/arya-bhanu/go-doc-generator/constants"
 )
 
@@ -39,6 +48,11 @@ type DocumentService struct {
 
 func NewDocumentService(gdriveRepo docrepo.GDriveRepository) *DocumentService {
 	return &DocumentService{GDriveRepo: gdriveRepo}
+}
+
+// CreateSession inserts a new form session row into the database.
+func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
+	return docrepo.CreateFormSessions(payload)
 }
 
 func fetchDocumentVariables() {}
@@ -190,9 +204,126 @@ func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[strin
 	}
 }
 
-func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
-	if err := docrepo.CreateFormSessions(payload); err != nil {
-		return err
+// GenerateDocuments is triggered for every new Google Form response.
+// It:
+//  1. Fetches the form_sessions row that owns formID to get the document list
+//     and the cust-variable scaffold (FormScaffoldCust).
+//  2. Builds a formFilledOps map (placeholder → answer) by matching each
+//     submitted question label against the scaffold's DocumentVariable.Label.
+//     When a question has multiple answers they are joined with ", ".
+//  3. For every document template listed in the session, reads the saved temp
+//     copy, replaces all <VARIABLE> placeholders via fillDocxVariables, and
+//     writes the filled document back to the temp folder with a unique name.
+func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormAnswer) {
+
+	go func() {
+		// store qAndA into form_sessions.form_filled_customer as json
+		if err := docrepo.StoreFormFilledCustomer(formID, qAndA); err != nil {
+			slog.Error("generateDocuments: store form_filled_customer",
+				"formID", formID, "err", err)
+		}
+	}()
+
+	// ── 1. Fetch the session ──────────────────────────────────────────────────
+	session, err := docrepo.FetchFormSession(formID)
+	if err != nil {
+		slog.Error("generateDocuments: fetch session", "formID", formID, "err", err)
+		return
 	}
-	return nil
+
+	// ── 2. Build the placeholder → answer map ─────────────────────────────────
+	// FormScaffoldCust keys are "<VARIABLE>" strings; values carry the Label
+	// that matches the Google Form question title.
+	formFilledOps := make(map[string]string)
+	for _, qa := range qAndA {
+		for key, docVar := range session.FormScaffoldCust {
+			if docVar == nil {
+				continue
+			}
+			if qa.Question != docVar.Label {
+				continue
+			}
+			switch len(qa.Answers) {
+			case 0:
+				formFilledOps[key] = ""
+			case 1:
+				formFilledOps[key] = qa.Answers[0]
+			default:
+				formFilledOps[key] = strings.Join(qa.Answers, ", ")
+			}
+		}
+	}
+
+	slog.Info("generateDocuments: variable map built",
+		"formID", formID,
+		"variables", len(formFilledOps),
+	)
+
+	slog.Info("formFilledOps:", "formFilledOps", formFilledOps)
+
+	// ── 3. Fill each document template, collect as email attachments ──────────
+	// Filled documents are kept in memory and attached directly to the email —
+	// they are never written back to temp/.  The original template file is
+	// deleted from temp/ after the email is dispatched.
+	var attachments []email.Attachment
+	var templatePaths []string
+
+	for _, detail := range session.DocDetails {
+		tempPath := filepath.Join("temp", detail.DocTempTitle)
+		templatePaths = append(templatePaths, tempPath)
+
+		data, err := os.ReadFile(tempPath)
+		if err != nil {
+			slog.Error("generateDocuments: read temp file",
+				"path", tempPath, "err", err)
+			continue
+		}
+
+		filled, err := FillDocxVariables(data, formFilledOps)
+		if err != nil {
+			slog.Error("generateDocuments: fill variables",
+				"title", detail.DocTempTitle, "err", err)
+			continue
+		}
+
+		uid, _ := uuid.NewV6()
+		outTitle := fmt.Sprintf("%s_filled_%s.docx", uid.String(), detail.OriginalTitle)
+
+		attachments = append(attachments, email.Attachment{
+			Filename: outTitle,
+			Data:     filled,
+		})
+		slog.Info("generateDocuments: document filled", "title", outTitle)
+	}
+
+	if len(attachments) == 0 {
+		slog.Warn("generateDocuments: no documents filled, skipping email",
+			"formID", formID)
+		return
+	}
+
+	// ── 4. Resolve recipient email from session's user ID ─────────────────────
+	userOps, err := usersrepo.GetUserByID(session.UserID)
+	if err != nil {
+		slog.Error("generateDocuments: get user by id",
+			"userID", session.UserID, "err", err)
+		return
+	}
+
+	// ── 5. Send email with all filled documents attached ──────────────────────
+	email.SendEmail(
+		fmt.Sprintf("Dokumen Anda Telah Diisi — %s", formID),
+		attachments,
+		userOps.Email,
+	)
+
+	// ── 6. Remove original template files from temp/ ──────────────────────────
+	for _, path := range templatePaths {
+		if rmErr := os.Remove(path); rmErr != nil {
+			slog.Warn("generateDocuments: remove template",
+				"path", path, "err", rmErr)
+		} else {
+			slog.Info("generateDocuments: template removed", "path", path)
+		}
+	}
 }

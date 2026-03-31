@@ -1,0 +1,146 @@
+package service
+
+import (
+	"archive/zip"
+	"bytes"
+	"fmt"
+	"io"
+	"regexp"
+	"strings"
+)
+
+// FillDocxVariables rewrites a .docx file's word/document.xml in-memory,
+// replacing every <VARIABLE> placeholder (stored as &lt;VARIABLE&gt; inside the
+// XML) with the corresponding value from replacements (keyed as "<VARIABLE>").
+// All other ZIP entries are copied through unchanged.
+//
+// The returned bytes form a valid .docx that can be saved directly to disk or
+// streamed to a client.
+//
+// Split-run handling: Word sometimes stores a single placeholder across
+// multiple <w:r> elements (e.g. &lt;NO_ in one run and HP&gt; in the next).
+// FillDocxVariables detects and handles these splits transparently.
+func FillDocxVariables(data []byte, replacements map[string]string) ([]byte, error) {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("fillDocx: open zip: %w", err)
+	}
+
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	for _, f := range r.File {
+		// Preserve the original file header (compression method, timestamps, …).
+		fw, err := w.CreateHeader(&f.FileHeader)
+		if err != nil {
+			return nil, fmt.Errorf("fillDocx: create zip entry %q: %w", f.Name, err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("fillDocx: open zip entry %q: %w", f.Name, err)
+		}
+		content, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, fmt.Errorf("fillDocx: read zip entry %q: %w", f.Name, err)
+		}
+
+		// Only modify the main document body; leave styles, images, etc. alone.
+		if f.Name == "word/document.xml" {
+			content = replaceAngleBracketVars(content, replacements)
+		}
+
+		if _, err := fw.Write(content); err != nil {
+			return nil, fmt.Errorf("fillDocx: write zip entry %q: %w", f.Name, err)
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("fillDocx: close zip writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// replaceAngleBracketVars substitutes every &lt;VARIABLE&gt; occurrence in
+// xmlContent with the matching value from replacements (key format: "<VARIABLE>").
+//
+// In a .docx file the literal characters < and > are XML-encoded as &lt; and
+// &gt; inside <w:t> elements, so a template placeholder like <NAMA> lives in
+// the raw XML as &lt;NAMA&gt;.
+//
+// Split-run problem: Word's XML editor sometimes stores a single placeholder
+// across multiple <w:r> elements, e.g.:
+//
+//	&lt;NO_</w:t></w:r><w:r><w:t>HP&gt;
+//
+// This function uses a per-variable regex (see buildSplitRunRegex) that matches
+// the placeholder characters even when XML tags are interspersed between them,
+// so both the normal and split-run cases are handled correctly.
+//
+// Replacement values are XML-escaped so that special characters such as &, <,
+// >, ", and ' do not corrupt the document XML.
+func replaceAngleBracketVars(xmlContent []byte, replacements map[string]string) []byte {
+	result := string(xmlContent)
+	for key, value := range replacements {
+		// key format is "<VARIABLE>" — strip the outer angle brackets to get
+		// just the variable name, then build a split-run-aware regex.
+		if len(key) < 3 || key[0] != '<' || key[len(key)-1] != '>' {
+			continue // unexpected key format — skip
+		}
+		varName := key[1 : len(key)-1]
+		re := buildSplitRunRegex(varName)
+		// Use ReplaceAllLiteralString so that $ in the value is not interpreted
+		// as a regex back-reference.
+		result = re.ReplaceAllLiteralString(result, xmlEscapeValue(value))
+	}
+	return []byte(result)
+}
+
+// buildSplitRunRegex returns a compiled regex that matches &lt;VARNAME&gt;
+// even when XML tags are interspersed between any of the characters.
+//
+// Word's XML occasionally splits a placeholder like <NO_HP> across multiple
+// <w:r> runs, producing raw XML such as:
+//
+//	&lt;NO_</w:t></w:r><w:r><w:t>HP&gt;
+//
+// The returned pattern handles this by allowing `(?:<[^>]+>)*` — zero or more
+// XML tags — between every pair of adjacent characters, including inside the
+// &lt; and &gt; entity sequences themselves.
+//
+// When the regex matches a split-run placeholder, the replacement replaces the
+// entire match (including the interleaved XML tags), leaving the surrounding
+// <w:t>…</w:t> structure intact and producing a valid single-run element.
+func buildSplitRunRegex(varName string) *regexp.Regexp {
+	const optTag = `(?:<[^>]+>)*`
+
+	// seq builds a pattern for a literal string s where any XML tags may appear
+	// between consecutive characters.
+	seq := func(s string) string {
+		var sb strings.Builder
+		for i, ch := range s {
+			if i > 0 {
+				sb.WriteString(optTag)
+			}
+			sb.WriteString(regexp.QuoteMeta(string(ch)))
+		}
+		return sb.String()
+	}
+
+	pattern := seq("&lt;") + optTag + seq(varName) + optTag + seq("&gt;")
+	return regexp.MustCompile(pattern)
+}
+
+// xmlEscapeValue escapes characters that are illegal (or ambiguous) inside XML
+// text content so that replacement values are rendered correctly in Word.
+func xmlEscapeValue(s string) string {
+	// Order matters: & must be escaped first to avoid double-escaping.
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
+}
