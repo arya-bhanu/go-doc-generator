@@ -90,14 +90,6 @@ func DeleteFormID(form_session_id string, form_id string) {
 	}
 }
 
-// AddFormID registers a Google Form ID in the in-memory watcher map.
-// The map guarantees uniqueness – duplicate IDs are silently ignored.
-func AddFormID(formID string) {
-	mu.Lock()
-	defer mu.Unlock()
-	storeFormID[formID] = struct{}{}
-}
-
 // watchForms is the background goroutine started by StartPooler.
 // On every tick it takes a snapshot of the current form IDs and spawns one
 // goroutine per form to poll for new responses.

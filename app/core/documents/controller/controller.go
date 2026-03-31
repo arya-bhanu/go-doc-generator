@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	formservice "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
 	httpresponsewrapper "github.com/arya-bhanu/go-doc-generator/utils/http_response_wrapper"
@@ -60,9 +59,6 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-
-	// insert into memory for pooler
-	conpool.AddFormID(formRes.FormID)
 
 	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: formRes.FormLink})
 }
