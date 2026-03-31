@@ -94,7 +94,7 @@ func FetchFormSession(formID string) (*documents.FormSessions, error) {
 
 // StoreFormFilledCustomer marshals qAndA to JSON and writes it into the
 // form_filled_customer column of the form_sessions row identified by formID.
-func StoreFormFilledCustomer(formID string, qAndA []conpool.FormAnswer) error {
+func StoreFormFilledCustomer(formID string, qAndA map[string]conpool.FormAnswer) error {
 	data, err := json.Marshal(qAndA)
 	if err != nil {
 		return fmt.Errorf("supabase: marshal form_filled_customer: %w", err)
@@ -112,6 +112,20 @@ func StoreFormFilledCustomer(formID string, qAndA []conpool.FormAnswer) error {
 		return fmt.Errorf("supabase: update form_filled_customer: %w", err)
 	}
 
+	return nil
+}
+
+// DeleteFormIDSession sets form_id to NULL on the form_sessions row identified
+// by formID, effectively unlinking the Google Form from the session.
+func DeleteFormIDSession(formID string) error {
+	_, err := database.DB.Exec(
+		context.Background(),
+		`UPDATE form_sessions SET form_id = NULL WHERE form_id = $1`,
+		formID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: clear form_id for session %q: %w", formID, err)
+	}
 	return nil
 }
 

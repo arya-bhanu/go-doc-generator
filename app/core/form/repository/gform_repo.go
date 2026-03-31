@@ -23,30 +23,15 @@ func NewGFormRepo(formsSvc *forms.Service, driveSvc *drive.Service) *GFormRepo {
 	return &GFormRepo{formsSvc: formsSvc, driveSvc: driveSvc}
 }
 
-func (r *GFormRepo) CreateForm(ctx context.Context, title string, items []*forms.Item) (string, error) {
+func (r *GFormRepo) CreateForm(ctx context.Context, title string, items []*forms.Item) (service.GoogleFormRes, error) {
 	form, err := r.formsSvc.Forms.Create(&forms.Form{
 		Info: &forms.Info{
 			Title: title,
 		},
 	}).Context(ctx).Do()
 	if err != nil {
-		return "", fmt.Errorf("gform: create form: %w", err)
+		return service.GoogleFormRes{}, fmt.Errorf("gform: create form: %w", err)
 	}
-
-	// if r.driveSvc != nil && r.folderID != "" {
-	// 	_, moveErr := r.driveSvc.Files.Update(form.FormId, &drive.File{}).
-	// 		AddParents(r.folderID).
-	// 		RemoveParents("root").
-	// 		Fields("id, parents").
-	// 		SupportsAllDrives(true).
-	// 		Do()
-	// 	if moveErr != nil {
-	// 		slog.Warn("gform: failed to move form to folder",
-	// 			"formId", form.FormId,
-	// 			"folderID", r.folderID,
-	// 			"err", moveErr)
-	// 	}
-	// }
 
 	if len(items) == 0 {
 		return service.GoogleFormRes{FormLink: form.ResponderUri, FormID: form.FormId}, nil

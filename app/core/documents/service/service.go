@@ -215,14 +215,6 @@ func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[strin
 //     writes the filled document back to the temp folder with a unique name.
 func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormAnswer) {
 
-	go func() {
-		// store qAndA into form_sessions.form_filled_customer as json
-		if err := docrepo.StoreFormFilledCustomer(formID, qAndA); err != nil {
-			slog.Error("generateDocuments: store form_filled_customer",
-				"formID", formID, "err", err)
-		}
-	}()
-
 	// ── 1. Fetch the session ──────────────────────────────────────────────────
 	session, err := docrepo.FetchFormSession(formID)
 	if err != nil {
@@ -234,6 +226,7 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 	// FormScaffoldCust keys are "<VARIABLE>" strings; values carry the Label
 	// that matches the Google Form question title.
 	formFilledOps := make(map[string]string)
+	storedFormFilledDetail := make(map[string]conpool.FormAnswer)
 	for _, qa := range qAndA {
 		for key, docVar := range session.FormScaffoldCust {
 			if docVar == nil {
@@ -242,6 +235,7 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 			if qa.Question != docVar.Label {
 				continue
 			}
+			storedFormFilledDetail[key] = qa
 			switch len(qa.Answers) {
 			case 0:
 				formFilledOps[key] = ""
@@ -252,6 +246,14 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 			}
 		}
 	}
+
+	go func() {
+		// store qAndA into form_sessions.form_filled_customer as json
+		if err := docrepo.StoreFormFilledCustomer(formID, storedFormFilledDetail); err != nil {
+			slog.Error("generateDocuments: store form_filled_customer",
+				"formID", formID, "err", err)
+		}
+	}()
 
 	slog.Info("generateDocuments: variable map built",
 		"formID", formID,
@@ -324,5 +326,13 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 		} else {
 			slog.Info("generateDocuments: template removed", "path", path)
 		}
+	}
+
+	// ── 7. Delete the form session row from the database ─────────────────────
+	if err := docrepo.DeleteFormIDSession(formID); err != nil {
+		slog.Error("generateDocuments: delete form session",
+			"formID", formID, "err", err)
+	} else {
+		slog.Info("generateDocuments: form session deleted", "formID", formID)
 	}
 }

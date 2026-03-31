@@ -38,7 +38,7 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	}
 
 	// this will generate a google form using google form API service
-	formLink, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formconst.FormCustTitle, userVars)
+	formRes, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formconst.FormCustTitle, userVars)
 	if err != nil {
 		slog.Error("failed to generate google form", "err", err.Error())
 		c.Error(err)
