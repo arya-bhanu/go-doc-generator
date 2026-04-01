@@ -226,6 +226,42 @@ func StoreFormFilledCustomer(formID string, qAndA map[string]conpool.FormAnswer)
 	return nil
 }
 
+// ClearFormScaffoldCust sets form_scaffold_cust, form_link, and form_id to NULL
+// on the form_sessions row for the given userID.
+func ClearFormScaffoldCust(userID int) error {
+	_, err := database.DB.Exec(
+		context.Background(),
+		`UPDATE form_sessions
+		 SET form_scaffold_cust = NULL,
+		     form_link          = NULL,
+		     form_id            = NULL
+		 WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: clear form_scaffold_cust for user_id %d: %w", userID, err)
+	}
+	return nil
+}
+
+// ClearFormScaffoldOps sets form_scaffold_ops, form_link, and form_id to NULL
+// on the form_sessions row for the given userID.
+func ClearFormScaffoldOps(userID int) error {
+	_, err := database.DB.Exec(
+		context.Background(),
+		`UPDATE form_sessions
+		 SET form_scaffold_ops = NULL,
+		     form_link         = NULL,
+		     form_id           = NULL
+		 WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: clear form_scaffold_ops for user_id %d: %w", userID, err)
+	}
+	return nil
+}
+
 // DeleteFormIDSession sets form_id to NULL on the form_sessions row identified
 // by formID, effectively unlinking the Google Form from the session.
 func DeleteFormIDSession(formID string) error {
@@ -268,6 +304,58 @@ func FetchDocVariable(variable string) *documents.DocumentVariable {
 	}
 
 	return &dv
+}
+
+// FetchFormFilledOps retrieves the form_filled_ops JSONB column from the
+// form_sessions row for the given userID and decodes it into a
+// map[string]conpool.FormAnswer. Returns nil on any error or when no row exists.
+func FetchFormFilledOps(userID int) map[string]conpool.FormAnswer {
+	var raw []byte
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT form_filled_ops
+		 FROM form_sessions
+		 WHERE user_id = $1
+		 LIMIT 1`,
+		userID,
+	).Scan(&raw)
+	if err != nil {
+		return nil
+	}
+
+	var result map[string]conpool.FormAnswer
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+
+	return result
+}
+
+// FetchFormScaffoldOps retrieves the form_scaffold_ops JSONB column from the
+// form_sessions row for the given userID and decodes it into a
+// *map[string]*documents.DocumentVariable. Returns nil on any error or when no row exists.
+func FetchFormScaffoldOps(userID int) *map[string]*documents.DocumentVariable {
+	var raw []byte
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT form_scaffold_ops
+		 FROM form_sessions
+		 WHERE user_id = $1
+		 LIMIT 1`,
+		userID,
+	).Scan(&raw)
+	if err != nil {
+		return nil
+	}
+
+	var result map[string]*documents.DocumentVariable
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+
+	return &result
 }
 
 // FetchAnswerdCustomerForm queries the form_sessions row for the given userID

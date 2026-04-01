@@ -55,6 +55,18 @@ func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
 	return docrepo.CreateFormSessions(payload)
 }
 
+// ClearFormScaffoldCust nulls out form_scaffold_cust, form_link, and form_id
+// on the form_sessions row for the given userID.
+func (s *DocumentService) ClearFormScaffoldCust(userID int) error {
+	return docrepo.ClearFormScaffoldCust(userID)
+}
+
+// ClearFormScaffoldOps nulls out form_scaffold_ops, form_link, and form_id
+// on the form_sessions row for the given userID.
+func (s *DocumentService) ClearFormScaffoldOps(userID int) error {
+	return docrepo.ClearFormScaffoldOps(userID)
+}
+
 // UpsertSession checks whether a form_sessions row already exists for the
 // payload's UserID.  If it does, it updates form_link, form_scaffold_cust,
 // doc_details, and form_id on that row.  Otherwise it creates a fresh row.
@@ -149,8 +161,6 @@ func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, an
 	return nil
 }
 
-func fetchDocumentVariables() {}
-
 func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.DocumentFile, error) {
 	return s.GDriveRepo.FetchDocuments(docIDs)
 }
@@ -216,8 +226,11 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 				if _, ok := answeredQuestCust[key]; ok {
 					continue
 				}
+				res := repository.FetchDocVariable(key)
 				mu.Lock()
-				custVariables[key] = repository.FetchDocVariable(key)
+				if res != nil {
+					custVariables[key] = res
+				}
 				mu.Unlock()
 			}
 		}()
@@ -230,7 +243,9 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 			for key := range userOpsVarChan {
 				res := repository.FetchDocVariable(key)
 				mu.Lock()
-				userOpsVariables[key] = res
+				if res != nil {
+					userOpsVariables[key] = res
+				}
 				mu.Unlock()
 			}
 		}()
@@ -460,3 +475,5 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 		slog.Info("generateDocuments: form session deleted", "formID", formID)
 	}
 }
+
+func fetchDocumentVariables() {}
