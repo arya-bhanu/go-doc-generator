@@ -74,8 +74,11 @@ func FetchFormSession(formID string) (*documents.FormSessions, error) {
 	if err := json.Unmarshal(docDetailsJSON, &session.DocDetails); err != nil {
 		return nil, fmt.Errorf("supabase: unmarshal doc_details: %w", err)
 	}
-	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
-		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+
+	if len(formScaffoldCustJSON) > 0 {
+		if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
+			return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+		}
 	}
 
 	return &session, nil
@@ -117,8 +120,11 @@ func FetchFormSessionByUserID(userID int) (*documents.FormSessions, error) {
 	if err := json.Unmarshal(docDetailsJSON, &session.DocDetails); err != nil {
 		return nil, fmt.Errorf("supabase: unmarshal doc_details: %w", err)
 	}
-	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
-		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+	// form_scaffold_cust is nullable — skip unmarshal when the column is NULL.
+	if len(formScaffoldCustJSON) > 0 {
+		if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
+			return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+		}
 	}
 
 	return &session, nil
@@ -238,6 +244,40 @@ func DeleteFormIDSession(formID string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("supabase: clear form_id for session %q: %w", formID, err)
+	}
+	return nil
+}
+
+// DeleteFormSessionByUserID removes the form_sessions row for the given userID.
+func DeleteFormSessionByUserID(userID int) error {
+	_, err := database.DB.Exec(
+		context.Background(),
+		`DELETE FROM form_sessions WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: delete form_sessions for user_id %d: %w", userID, err)
+	}
+	return nil
+}
+
+// UpsertDocumentTemplates inserts new rows into stored_document_templates.
+// If a row with the same google_file_id already exists it is silently skipped
+// (no update, no error).
+func UpsertDocumentTemplates(templates []documents.StoredDocumentTemplate) error {
+	for _, t := range templates {
+		_, err := database.DB.Exec(
+			context.Background(),
+			`INSERT INTO stored_document_templates (google_file_id, link, title)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (google_file_id) DO NOTHING`,
+			t.GoogleFileID,
+			t.Link,
+			t.Title,
+		)
+		if err != nil {
+			return fmt.Errorf("supabase: insert stored_document_templates %q: %w", t.GoogleFileID, err)
+		}
 	}
 	return nil
 }

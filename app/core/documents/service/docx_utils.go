@@ -3,6 +3,7 @@ package service
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -30,30 +31,51 @@ func FillDocxVariables(data []byte, replacements map[string]string, opsReplaceme
 	w := zip.NewWriter(&buf)
 
 	for _, f := range r.File {
-		// Preserve the original file header (compression method, timestamps, …).
-		fw, err := w.CreateHeader(&f.FileHeader)
-		if err != nil {
-			return nil, fmt.Errorf("fillDocx: create zip entry %q: %w", f.Name, err)
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return nil, fmt.Errorf("fillDocx: open zip entry %q: %w", f.Name, err)
-		}
-		content, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			return nil, fmt.Errorf("fillDocx: read zip entry %q: %w", f.Name, err)
-		}
-
-		// Only modify the main document body; leave styles, images, etc. alone.
 		if f.Name == "word/document.xml" {
+			// This entry must be decompressed so we can substitute variables.
+			// Preserve the original file header (compression method, timestamps, …).
+			fw, err := w.CreateHeader(&f.FileHeader)
+			if err != nil {
+				return nil, fmt.Errorf("fillDocx: create zip entry %q: %w", f.Name, err)
+			}
+
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("fillDocx: open zip entry %q: %w", f.Name, err)
+			}
+			content, readErr := io.ReadAll(rc)
+			rc.Close()
+			// zip.ErrChecksum means the CRC32 stored in the ZIP header does not match
+			// the actual data. Google Drive sometimes exports .docx files with wrong
+			// CRC32 values — Word opens them fine because it ignores this field, but
+			// Go's zip package is strict. By the time ErrChecksum is returned, all
+			// bytes have already been decompressed into `content`, so the data is
+			// intact and safe to use.
+			if readErr != nil && !errors.Is(readErr, zip.ErrChecksum) {
+				return nil, fmt.Errorf("fillDocx: read zip entry %q: %w", f.Name, readErr)
+			}
+
 			content = replaceAngleBracketVars(content, replacements)
 			content = replaceCurlyBraceVars(content, opsReplacements)
-		}
 
-		if _, err := fw.Write(content); err != nil {
-			return nil, fmt.Errorf("fillDocx: write zip entry %q: %w", f.Name, err)
+			if _, err := fw.Write(content); err != nil {
+				return nil, fmt.Errorf("fillDocx: write zip entry %q: %w", f.Name, err)
+			}
+		} else {
+			// For every other entry (styles, images, [Content_Types].xml, etc.) copy
+			// the raw compressed bytes directly — no decompression, no CRC validation.
+			// This is both faster and immune to the bad-CRC32 problem described above.
+			fw, err := w.CreateRaw(&f.FileHeader)
+			if err != nil {
+				return nil, fmt.Errorf("fillDocx: create raw zip entry %q: %w", f.Name, err)
+			}
+			rc, err := f.OpenRaw()
+			if err != nil {
+				return nil, fmt.Errorf("fillDocx: open raw zip entry %q: %w", f.Name, err)
+			}
+			if _, err := io.Copy(fw, rc); err != nil {
+				return nil, fmt.Errorf("fillDocx: copy raw zip entry %q: %w", f.Name, err)
+			}
 		}
 	}
 

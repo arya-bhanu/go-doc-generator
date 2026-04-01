@@ -257,7 +257,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 
 	payload := documents.FormSessions{
 		DocDetails:       docDetails,
-		FormLink:         "",
+		FormLink:         nil,
 		FormScaffoldCust: &custVariables,
 		UserID:           userOps.ID,
 	}
@@ -482,4 +482,35 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 	} else {
 		slog.Info("generateDocuments: form session deleted", "formID", formID)
 	}
+}
+
+// RefreshDocumentTemplates lists every .docx file in the Google Drive folder
+// identified by the GOOGLE_DRIVE_TEMPLATE_ID environment variable and upserts
+// the results into the stored_document_templates table.
+func (s *DocumentService) RefreshDocumentTemplates() ([]documents.StoredDocumentTemplate, error) {
+	folderID := os.Getenv("GOOGLE_DRIVE_TEMPLATE_ID")
+	if folderID == "" {
+		return nil, fmt.Errorf("refreshDocumentTemplates: GOOGLE_DRIVE_TEMPLATE_ID env var is not set")
+	}
+
+	files, err := s.GDriveRepo.ListFolderDocuments(folderID)
+	if err != nil {
+		return nil, fmt.Errorf("refreshDocumentTemplates: list folder: %w", err)
+	}
+
+	templates := make([]documents.StoredDocumentTemplate, 0, len(files))
+	for _, f := range files {
+		templates = append(templates, documents.StoredDocumentTemplate{
+			GoogleFileID: f.ID,
+			Link:         f.WebViewLink,
+			Title:        f.Name,
+		})
+	}
+
+	if err := docrepo.UpsertDocumentTemplates(templates); err != nil {
+		return nil, fmt.Errorf("refreshDocumentTemplates: upsert: %w", err)
+	}
+
+	slog.Info("refreshDocumentTemplates: templates synced", "count", len(templates))
+	return templates, nil
 }

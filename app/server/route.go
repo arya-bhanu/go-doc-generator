@@ -73,10 +73,16 @@ func registerRoutes(r *gin.Engine, handler *ctr.Handler, opsController *ops_ctr.
 			customer.POST("/create-form", handler.CreateGoogleFormController)
 		}
 
+		document := api.Group("/document")
+		{
+			document.POST("/refresh", handler.RefreshDocumentTemplates)
+		}
+
 		ops := api.Group("/ops")
 		{
 			ops.POST("/on-login", opsController.OnLoginOps)
 			ops.POST("/submit-form", opsController.SubmitForm)
+			ops.DELETE("/session", opsController.DeleteSession)
 		}
 	}
 }

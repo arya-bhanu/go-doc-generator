@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	docrepo "github.com/arya-bhanu/go-doc-generator/app/core/documents/repository"
 	"github.com/arya-bhanu/go-doc-generator/app/core/users"
 	"github.com/arya-bhanu/go-doc-generator/app/core/users/service"
 	"github.com/arya-bhanu/go-doc-generator/constants"
@@ -82,5 +83,33 @@ func (h *UserOpsHandler) OnLoginOps(c *gin.Context) {
 		Err:     "",
 		Msg:     "success fetch ops field",
 		Data:    defaultField,
+	})
+}
+
+// DeleteSession handles DELETE /api/ops/session.
+// It permanently removes the form_sessions row for the authenticated user.
+func (h *UserOpsHandler) DeleteSession(c *gin.Context) {
+	var userID int
+	userCtx, exist := c.Get(constants.UserOpsContextKey)
+	if exist {
+		userID = userCtx.(users.UserOps).ID
+	}
+
+	if err := docrepo.DeleteFormSessionByUserID(userID); err != nil {
+		slog.Error("deleteSession: failed", "user_id", userID, "err", err.Error())
+		c.JSON(http.StatusInternalServerError, httpresponsewrapper.HttpResponse{
+			Success: false,
+			Err:     err.Error(),
+			Msg:     "failed to delete session",
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{
+		Success: true,
+		Err:     "",
+		Msg:     "session deleted successfully",
+		Data:    nil,
 	})
 }

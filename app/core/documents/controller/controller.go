@@ -23,6 +23,25 @@ func NewHandler(docService *docsvc.DocumentService, formService *formservice.For
 	return &Handler{DocService: docService, FormService: formService}
 }
 
+// RefreshDocumentTemplates handles POST /api/document/refresh.
+// It fetches all .docx files from the Google Drive template folder
+// (GOOGLE_DRIVE_TEMPLATE_ID) and upserts them into stored_document_templates.
+func (h *Handler) RefreshDocumentTemplates(c *gin.Context) {
+	templates, err := h.DocService.RefreshDocumentTemplates()
+	if err != nil {
+		slog.Error("refreshDocumentTemplates: failed", "err", err.Error())
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{
+		Success: true,
+		Err:     "",
+		Msg:     "document templates refreshed successfully",
+		Data:    templates,
+	})
+}
+
 func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	var payload CreateFormPayload
 	var userID int
@@ -81,7 +100,7 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	}
 
 	// will set the formLink into the payload
-	varPayload.FormLink = formRes.FormLink
+	varPayload.FormLink = &formRes.FormLink
 	varPayload.FormID = &formRes.FormID
 
 	// If a form_session already exists for this user (matched by user_id),

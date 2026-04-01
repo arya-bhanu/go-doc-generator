@@ -10,8 +10,15 @@ import (
 	"google.golang.org/api/drive/v3"
 )
 
+type DriveFileInfo struct {
+	ID          string
+	Name        string
+	WebViewLink string
+}
+
 type GDriveRepository interface {
 	FetchDocuments(docIDs []string) ([]DocumentFile, error)
+	ListFolderDocuments(folderID string) ([]DriveFileInfo, error)
 }
 
 type GDriveRepo struct {
@@ -56,4 +63,46 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 	}
 
 	return result, nil
+}
+
+func (r *GDriveRepo) ListFolderDocuments(folderID string) ([]DriveFileInfo, error) {
+	const docxMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	query := fmt.Sprintf(
+		"'%s' in parents and mimeType='%s' and trashed=false",
+		folderID, docxMIME,
+	)
+
+	var results []DriveFileInfo
+	pageToken := ""
+
+	for {
+		req := r.svc.Files.List().
+			Q(query).
+			Fields("nextPageToken, files(id, name, webViewLink)").
+			PageSize(100)
+		if pageToken != "" {
+			req = req.PageToken(pageToken)
+		}
+
+		res, err := req.Do()
+		if err != nil {
+			return nil, fmt.Errorf("gdrive: list folder %q: %w", folderID, err)
+		}
+
+		for _, f := range res.Files {
+			baseName := strings.TrimSuffix(f.Name, filepath.Ext(f.Name))
+			results = append(results, DriveFileInfo{
+				ID:          f.Id,
+				Name:        baseName,
+				WebViewLink: f.WebViewLink,
+			})
+		}
+
+		if res.NextPageToken == "" {
+			break
+		}
+		pageToken = res.NextPageToken
+	}
+
+	return results, nil
 }

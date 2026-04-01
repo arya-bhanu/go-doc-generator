@@ -2,6 +2,12 @@ package documents
 
 import "time"
 
+type StoredDocumentTemplate struct {
+	GoogleFileID string `json:"google_file_id"`
+	Link         string `json:"link"`
+	Title        string `json:"title"`
+}
+
 type DocumentVariable struct {
 	ID              int       `json:"id"`
 	Variable        string    `json:"variable"`
@@ -20,8 +26,8 @@ type DocumentDetail struct {
 
 type FormSessions struct {
 	DocDetails       []DocumentDetail              `json:"doc_details"`
-	FormLink         string                        `json:"form_link,omitempty"`
-	FormScaffoldCust *map[string]*DocumentVariable `json:"form_scaffold_cust"`
+	FormLink         *string                       `json:"form_link,omitempty"`
+	FormScaffoldCust *map[string]*DocumentVariable `json:"form_scaffold_cust,omitempty"`
 	UserID           int                           `json:"user_id"`
-	FormID           *string                       `json:"form_id"`
+	FormID           *string                       `json:"form_id,omitempty"`
 }
