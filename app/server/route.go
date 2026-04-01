@@ -13,9 +13,10 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 
 	ctr "github.com/arya-bhanu/go-doc-generator/app/core/documents/controller"
+	ops_ctr "github.com/arya-bhanu/go-doc-generator/app/core/users/controller"
 )
 
-func registerRoutes(r *gin.Engine, handler *ctr.Handler) {
+func registerRoutes(r *gin.Engine, handler *ctr.Handler, opsController *ops_ctr.UserOpsHandler) {
 	r.Use(cors.New(cors.Config{
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-App-Identity"},
@@ -70,6 +71,12 @@ func registerRoutes(r *gin.Engine, handler *ctr.Handler) {
 		customer := api.Group("/customer")
 		{
 			customer.POST("/create-form", handler.CreateGoogleFormController)
+		}
+
+		ops := api.Group("/ops")
+		{
+			ops.POST("/on-login", opsController.OnLoginOps)
+			ops.POST("/submit-form", opsController.SubmitForm)
 		}
 	}
 }

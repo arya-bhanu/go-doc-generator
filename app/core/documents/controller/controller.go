@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	formservice "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
 	"github.com/arya-bhanu/go-doc-generator/app/core/users"
@@ -24,11 +23,6 @@ func NewHandler(docService *docsvc.DocumentService, formService *formservice.For
 	return &Handler{DocService: docService, FormService: formService}
 }
 
-type CreateGoogleFormDataRes struct {
-	FormLink           string                         `json:"form_link"`
-	OpsStrucutredField map[string]docsvc.UserOpsField `json:"ops_structured_field"`
-}
-
 func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	var payload CreateFormPayload
 	var userID int
@@ -43,18 +37,16 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	userVars, opsVars, answeredQuestCust, varPayload, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
+	userVars, answeredQuestCust, varPayload, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
 	if err != nil {
 		slog.Error("failed to process documents", "err", err.Error())
 		c.Error(err)
 		return
 	}
 
-	structuredOpsField := service.GenerateUserOpsField(userID, opsVars)
-
 	// If all customer variables are already answered (userVars is empty),
 	// skip form generation and send the filled documents directly via email.
-	if len(userVars) == 0 && len(opsVars) == 0 {
+	if len(userVars) == 0 {
 		if err = h.DocService.SendDocumentsDirect(varPayload, answeredQuestCust); err != nil {
 			slog.Error("failed to send documents directly", "err", err.Error())
 			c.Error(err)
@@ -62,20 +54,9 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		}
 
 		go func() {
-			if len(userVars) == 0 {
-				if err := h.DocService.ClearFormScaffoldCust(userID); err != nil {
-					slog.Error("failed to clear form_scaffold_cust",
-						"userID", userID, "err", err.Error())
-				}
-			}
-		}()
-
-		go func() {
-			if len(opsVars) == 0 {
-				if err := h.DocService.ClearFormScaffoldOps(userID); err != nil {
-					slog.Error("failed to clear form_scaffold_ops",
-						"userID", userID, "err", err.Error())
-				}
+			if err := h.DocService.ClearFormScaffoldCust(userID); err != nil {
+				slog.Error("failed to clear form_scaffold_cust",
+					"userID", userID, "err", err.Error())
 			}
 		}()
 
@@ -83,7 +64,7 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 			Success: true,
 			Err:     "",
 			Msg:     "all variables already answered — document sent to email",
-			Data:    CreateGoogleFormDataRes{FormLink: "", OpsStrucutredField: structuredOpsField},
+			Data:    "",
 		})
 		return
 	}
@@ -110,8 +91,5 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: CreateGoogleFormDataRes{
-		FormLink:           formRes.FormLink,
-		OpsStrucutredField: structuredOpsField,
-	}})
+	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: formRes.FormLink})
 }

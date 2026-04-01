@@ -11,7 +11,7 @@ import (
 )
 
 // CreateFormSessions inserts a new row into the form_sessions table.
-// doc_details, form_scaffold_cust, and form_scaffold_ops are stored as JSON.
+// doc_details and form_scaffold_cust are stored as JSON.
 // form_link is left empty on initial creation.
 func CreateFormSessions(payload documents.FormSessions) error {
 	docDetailsJSON, err := json.Marshal(payload.DocDetails)
@@ -25,20 +25,14 @@ func CreateFormSessions(payload documents.FormSessions) error {
 		return fmt.Errorf("supabase: marshal form_scaffold_cust: %w", err)
 	}
 
-	formScaffoldOpsJSON, err := json.Marshal(payload.FormScaffoldOps)
-	if err != nil {
-		return fmt.Errorf("supabase: marshal form_scaffold_ops: %w", err)
-	}
-
 	_, err = database.DB.Exec(
 		context.Background(),
 		`INSERT INTO form_sessions
-			(doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+			(doc_details, form_link, form_scaffold_cust, user_id, form_id)
+		 VALUES ($1, $2, $3, $4, $5)`,
 		docDetailsJSON,
 		payload.FormLink,
 		formScaffoldCustJSON,
-		formScaffoldOpsJSON,
 		payload.UserID,
 		payload.FormID,
 	)
@@ -50,19 +44,18 @@ func CreateFormSessions(payload documents.FormSessions) error {
 }
 
 // FetchFormSession retrieves the form_sessions row whose form_id matches the
-// given value.  The JSONB columns (doc_details, form_scaffold_cust,
-// form_scaffold_ops) are decoded into their respective Go types.
+// given value. The JSONB columns (doc_details, form_scaffold_cust) are decoded
+// into their respective Go types.
 func FetchFormSession(formID string) (*documents.FormSessions, error) {
 	var (
 		session              documents.FormSessions
 		docDetailsJSON       []byte
 		formScaffoldCustJSON []byte
-		formScaffoldOpsJSON  []byte
 	)
 
 	err := database.DB.QueryRow(
 		context.Background(),
-		`SELECT doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id
+		`SELECT doc_details, form_link, form_scaffold_cust, user_id, form_id
 		 FROM form_sessions
 		 WHERE form_id = $1
 		 LIMIT 1`,
@@ -71,7 +64,6 @@ func FetchFormSession(formID string) (*documents.FormSessions, error) {
 		&docDetailsJSON,
 		&session.FormLink,
 		&formScaffoldCustJSON,
-		&formScaffoldOpsJSON,
 		&session.UserID,
 		&session.FormID,
 	)
@@ -85,9 +77,6 @@ func FetchFormSession(formID string) (*documents.FormSessions, error) {
 	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
 		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
 	}
-	if err := json.Unmarshal(formScaffoldOpsJSON, &session.FormScaffoldOps); err != nil {
-		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_ops: %w", err)
-	}
 
 	return &session, nil
 }
@@ -100,12 +89,11 @@ func FetchFormSessionByUserID(userID int) (*documents.FormSessions, error) {
 		session              documents.FormSessions
 		docDetailsJSON       []byte
 		formScaffoldCustJSON []byte
-		formScaffoldOpsJSON  []byte
 	)
 
 	err := database.DB.QueryRow(
 		context.Background(),
-		`SELECT doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id
+		`SELECT doc_details, form_link, form_scaffold_cust, user_id, form_id
 		 FROM form_sessions
 		 WHERE user_id = $1
 		 LIMIT 1`,
@@ -114,7 +102,6 @@ func FetchFormSessionByUserID(userID int) (*documents.FormSessions, error) {
 		&docDetailsJSON,
 		&session.FormLink,
 		&formScaffoldCustJSON,
-		&formScaffoldOpsJSON,
 		&session.UserID,
 		&session.FormID,
 	)
@@ -132,9 +119,6 @@ func FetchFormSessionByUserID(userID int) (*documents.FormSessions, error) {
 	}
 	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
 		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
-	}
-	if err := json.Unmarshal(formScaffoldOpsJSON, &session.FormScaffoldOps); err != nil {
-		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_ops: %w", err)
 	}
 
 	return &session, nil
@@ -244,24 +228,6 @@ func ClearFormScaffoldCust(userID int) error {
 	return nil
 }
 
-// ClearFormScaffoldOps sets form_scaffold_ops, form_link, and form_id to NULL
-// on the form_sessions row for the given userID.
-func ClearFormScaffoldOps(userID int) error {
-	_, err := database.DB.Exec(
-		context.Background(),
-		`UPDATE form_sessions
-		 SET form_scaffold_ops = NULL,
-		     form_link         = NULL,
-		     form_id           = NULL
-		 WHERE user_id = $1`,
-		userID,
-	)
-	if err != nil {
-		return fmt.Errorf("supabase: clear form_scaffold_ops for user_id %d: %w", userID, err)
-	}
-	return nil
-}
-
 // DeleteFormIDSession sets form_id to NULL on the form_sessions row identified
 // by formID, effectively unlinking the Google Form from the session.
 func DeleteFormIDSession(formID string) error {
@@ -304,58 +270,6 @@ func FetchDocVariable(variable string) *documents.DocumentVariable {
 	}
 
 	return &dv
-}
-
-// FetchFormFilledOps retrieves the form_filled_ops JSONB column from the
-// form_sessions row for the given userID and decodes it into a
-// map[string]conpool.FormAnswer. Returns nil on any error or when no row exists.
-func FetchFormFilledOps(userID int) map[string]conpool.FormAnswer {
-	var raw []byte
-
-	err := database.DB.QueryRow(
-		context.Background(),
-		`SELECT form_filled_ops
-		 FROM form_sessions
-		 WHERE user_id = $1
-		 LIMIT 1`,
-		userID,
-	).Scan(&raw)
-	if err != nil {
-		return nil
-	}
-
-	var result map[string]conpool.FormAnswer
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil
-	}
-
-	return result
-}
-
-// FetchFormScaffoldOps retrieves the form_scaffold_ops JSONB column from the
-// form_sessions row for the given userID and decodes it into a
-// *map[string]*documents.DocumentVariable. Returns nil on any error or when no row exists.
-func FetchFormScaffoldOps(userID int) *map[string]*documents.DocumentVariable {
-	var raw []byte
-
-	err := database.DB.QueryRow(
-		context.Background(),
-		`SELECT form_scaffold_ops
-		 FROM form_sessions
-		 WHERE user_id = $1
-		 LIMIT 1`,
-		userID,
-	).Scan(&raw)
-	if err != nil {
-		return nil
-	}
-
-	var result map[string]*documents.DocumentVariable
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil
-	}
-
-	return &result
 }
 
 // FetchAnswerdCustomerForm queries the form_sessions row for the given userID

@@ -61,12 +61,6 @@ func (s *DocumentService) ClearFormScaffoldCust(userID int) error {
 	return docrepo.ClearFormScaffoldCust(userID)
 }
 
-// ClearFormScaffoldOps nulls out form_scaffold_ops, form_link, and form_id
-// on the form_sessions row for the given userID.
-func (s *DocumentService) ClearFormScaffoldOps(userID int) error {
-	return docrepo.ClearFormScaffoldOps(userID)
-}
-
 // UpsertSession checks whether a form_sessions row already exists for the
 // payload's UserID.  If it does, it updates form_link, form_scaffold_cust,
 // doc_details, and form_id on that row.  Otherwise it creates a fresh row.
@@ -165,11 +159,11 @@ func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.Doc
 	return s.GDriveRepo.FetchDocuments(docIDs)
 }
 
-func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]*documents.DocumentVariable, map[string]conpool.FormAnswer, documents.FormSessions, error) {
+func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]conpool.FormAnswer, documents.FormSessions, error) {
 	var answeredQuestCust map[string]conpool.FormAnswer
 	userctx, exist := c.Get(constants.UserOpsContextKey)
 	if !exist {
-		return nil, nil, answeredQuestCust, documents.FormSessions{}, errors.New("user not exist")
+		return nil, answeredQuestCust, documents.FormSessions{}, errors.New("user not exist")
 	}
 
 	userOps := userctx.(users.UserOps)
@@ -178,7 +172,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 
 	docs, err := s.fetchDocumentTemplates(docIDs)
 	if err != nil {
-		return nil, nil, answeredQuestCust, documents.FormSessions{}, err
+		return nil, answeredQuestCust, documents.FormSessions{}, err
 	}
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
@@ -257,11 +251,10 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 		DocDetails:       docDetails,
 		FormLink:         "",
 		FormScaffoldCust: &custVariables,
-		FormScaffoldOps:  &userOpsVariables,
 		UserID:           userOps.ID,
 	}
 
-	return custVariables, userOpsVariables, answeredQuestCust, payload, err
+	return custVariables, answeredQuestCust, payload, err
 }
 
 // scanDocument scans the raw .docx bytes for template variable placeholders.
@@ -475,5 +468,3 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 		slog.Info("generateDocuments: form session deleted", "formID", formID)
 	}
 }
-
-func fetchDocumentVariables() {}

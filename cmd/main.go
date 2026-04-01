@@ -15,6 +15,7 @@ import (
 	docsvc "github.com/arya-bhanu/go-doc-generator/app/core/documents/service"
 	formrepo "github.com/arya-bhanu/go-doc-generator/app/core/form/repository"
 	formsvc "github.com/arya-bhanu/go-doc-generator/app/core/form/service"
+	ops_ctr "github.com/arya-bhanu/go-doc-generator/app/core/users/controller"
 	"github.com/arya-bhanu/go-doc-generator/app/database"
 	googleapi "github.com/arya-bhanu/go-doc-generator/app/google_api"
 	"github.com/arya-bhanu/go-doc-generator/app/server"
@@ -113,5 +114,6 @@ func main() {
 	conpool.StartPooler()
 
 	handler := ctr.NewHandler(docService, formService)
-	server.Start(handler)
+	opsHandler := ops_ctr.NewController()
+	server.Start(handler, opsHandler)
 }

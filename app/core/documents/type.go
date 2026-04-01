@@ -22,7 +22,6 @@ type FormSessions struct {
 	DocDetails       []DocumentDetail              `json:"doc_details"`
 	FormLink         string                        `json:"form_link,omitempty"`
 	FormScaffoldCust *map[string]*DocumentVariable `json:"form_scaffold_cust"`
-	FormScaffoldOps  *map[string]*DocumentVariable `json:"form_scaffold_ops"`
 	UserID           int                           `json:"user_id"`
 	FormID           *string                       `json:"form_id"`
 }
