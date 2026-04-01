@@ -30,13 +30,31 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
-	userVars, _, varPayload, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
+	userVars, _, answeredQuestCust, varPayload, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
 	if err != nil {
 		slog.Error("failed to process documents", "err", err.Error())
 		c.Error(err)
 		return
 	}
 
+	// If all customer variables are already answered (userVars is empty),
+	// skip form generation and send the filled documents directly via email.
+	if len(userVars) == 0 {
+		if err = h.DocService.SendDocumentsDirect(varPayload, answeredQuestCust); err != nil {
+			slog.Error("failed to send documents directly", "err", err.Error())
+			c.Error(err)
+			return
+		}
+		c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{
+			Success: true,
+			Err:     "",
+			Msg:     "all variables already answered — document sent to email",
+			Data:    "",
+		})
+		return
+	}
+
+	// GENERATE GOOGLE FORM IF ONLY userVars is not an empty map
 	// this will generate a google form using google form API service
 	formRes, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formconst.FormCustTitle, userVars)
 	if err != nil {
@@ -47,11 +65,13 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 
 	// will set the formLink into the payload
 	varPayload.FormLink = formRes.FormLink
-	varPayload.FormID = formRes.FormID
+	varPayload.FormID = &formRes.FormID
 
-	// it will inserted into supabase
-	if err = h.DocService.CreateSession(varPayload); err != nil {
-		slog.Error("failed to create session", "err", err.Error())
+	// If a form_session already exists for this user (matched by user_id),
+	// update form_link, form_scaffold_cust, doc_details, and form_id only.
+	// Otherwise create a new session row.
+	if err = h.DocService.UpsertSession(varPayload); err != nil {
+		slog.Error("failed to upsert session", "err", err.Error())
 		c.Error(err)
 		return
 	}

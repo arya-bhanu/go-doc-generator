@@ -55,23 +55,128 @@ func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
 	return docrepo.CreateFormSessions(payload)
 }
 
+// UpsertSession checks whether a form_sessions row already exists for the
+// payload's UserID.  If it does, it updates form_link, form_scaffold_cust,
+// doc_details, and form_id on that row.  Otherwise it creates a fresh row.
+func (s *DocumentService) UpsertSession(payload documents.FormSessions) error {
+	existing, err := docrepo.FetchFormSessionByUserID(payload.UserID)
+	if err != nil {
+		return fmt.Errorf("upsertSession: check existing session: %w", err)
+	}
+
+	if existing != nil {
+		// Session already exists — update only the relevant fields.
+		return docrepo.UpdateFormSession(payload.UserID, payload)
+	}
+
+	// No existing session — create a new one.
+	return docrepo.CreateFormSessions(payload)
+}
+
+// SendDocumentsDirect fills every document template in payload.DocDetails with
+// answers from answeredQuestCust (matched via FormScaffoldCust labels), then
+// sends them by email to the session owner. Template files are removed from
+// temp/ after dispatch, mirroring the cleanup done in GenerateDocuments.
+func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, answeredQuestCust map[string]conpool.FormAnswer) error {
+	// Build placeholder → answer string map from the existing answered questions.
+	formFilledOps := make(map[string]string)
+	if payload.FormScaffoldCust != nil {
+		for key, docVar := range *payload.FormScaffoldCust {
+			if docVar == nil {
+				continue
+			}
+			qa, ok := answeredQuestCust[key]
+			if !ok {
+				continue
+			}
+			switch len(qa.Answers) {
+			case 0:
+				formFilledOps[key] = ""
+			case 1:
+				formFilledOps[key] = qa.Answers[0]
+			default:
+				formFilledOps[key] = strings.Join(qa.Answers, ", ")
+			}
+		}
+	}
+
+	var attachments []email.Attachment
+	var templatePaths []string
+
+	for _, detail := range payload.DocDetails {
+		tempPath := filepath.Join("temp", detail.DocTempTitle)
+		templatePaths = append(templatePaths, tempPath)
+
+		data, err := os.ReadFile(tempPath)
+		if err != nil {
+			slog.Error("sendDocumentsDirect: read temp file",
+				"path", tempPath, "err", err)
+			continue
+		}
+
+		filled, err := FillDocxVariables(data, formFilledOps)
+		if err != nil {
+			slog.Error("sendDocumentsDirect: fill variables",
+				"title", detail.DocTempTitle, "err", err)
+			continue
+		}
+
+		uid, _ := uuid.NewV6()
+		outTitle := fmt.Sprintf("%s_filled_%s.docx", uid.String(), detail.OriginalTitle)
+		attachments = append(attachments, email.Attachment{
+			Filename: outTitle,
+			Data:     filled,
+		})
+		slog.Info("sendDocumentsDirect: document filled", "title", outTitle)
+	}
+
+	if len(attachments) == 0 {
+		return fmt.Errorf("sendDocumentsDirect: no documents could be filled")
+	}
+
+	userOps, err := usersrepo.GetUserByID(payload.UserID)
+	if err != nil {
+		return fmt.Errorf("sendDocumentsDirect: get user by id %d: %w", payload.UserID, err)
+	}
+
+	email.SendEmail(
+		"Dokumen Anda Telah Dikirim",
+		attachments,
+		userOps.Email,
+	)
+
+	for _, path := range templatePaths {
+		if rmErr := os.Remove(path); rmErr != nil {
+			slog.Warn("sendDocumentsDirect: remove template",
+				"path", path, "err", rmErr)
+		} else {
+			slog.Info("sendDocumentsDirect: template removed", "path", path)
+		}
+	}
+
+	return nil
+}
+
 func fetchDocumentVariables() {}
 
 func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.DocumentFile, error) {
 	return s.GDriveRepo.FetchDocuments(docIDs)
 }
 
-func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]*documents.DocumentVariable, documents.FormSessions, error) {
+func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]*documents.DocumentVariable, map[string]conpool.FormAnswer, documents.FormSessions, error) {
+	var answeredQuestCust map[string]conpool.FormAnswer
 	userctx, exist := c.Get(constants.UserOpsContextKey)
 	if !exist {
-		return nil, nil, documents.FormSessions{}, errors.New("user not exist")
+		return nil, nil, answeredQuestCust, documents.FormSessions{}, errors.New("user not exist")
 	}
 
 	userOps := userctx.(users.UserOps)
 
+	answeredQuestCust = repository.FetchAnswerdCustomerForm(userOps.ID)
+
 	docs, err := s.fetchDocumentTemplates(docIDs)
 	if err != nil {
-		return nil, nil, documents.FormSessions{}, err
+		return nil, nil, answeredQuestCust, documents.FormSessions{}, err
 	}
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
@@ -116,9 +221,11 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 		go func() {
 			defer wg.Done()
 			for key := range custVarChan {
-				res := repository.FetchDocVariable(key)
+				if _, ok := answeredQuestCust[key]; ok {
+					continue
+				}
 				mu.Lock()
-				custVariables[key] = res
+				custVariables[key] = repository.FetchDocVariable(key)
 				mu.Unlock()
 			}
 		}()
@@ -142,12 +249,12 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	payload := documents.FormSessions{
 		DocDetails:       docDetails,
 		FormLink:         "",
-		FormScaffoldCust: custVariables,
-		FormScaffoldOps:  userOpsVariables,
+		FormScaffoldCust: &custVariables,
+		FormScaffoldOps:  &userOpsVariables,
 		UserID:           userOps.ID,
 	}
 
-	return custVariables, userOpsVariables, payload, err
+	return custVariables, userOpsVariables, answeredQuestCust, payload, err
 }
 
 // scanDocument scans the raw .docx bytes for template variable placeholders.
@@ -222,38 +329,63 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 		return
 	}
 
-	// ── 2. Build the placeholder → answer map ─────────────────────────────────
+	// ── 2. Build placeholder → answer maps ────────────────────────────────────
 	// FormScaffoldCust keys are "<VARIABLE>" strings; values carry the Label
 	// that matches the Google Form question title.
+	// storedFormFilledDetail keeps the full FormAnswer structs for DB storage.
 	formFilledOps := make(map[string]string)
 	storedFormFilledDetail := make(map[string]conpool.FormAnswer)
-	for _, qa := range qAndA {
-		for key, docVar := range session.FormScaffoldCust {
-			if docVar == nil {
-				continue
-			}
-			if qa.Question != docVar.Label {
-				continue
-			}
-			storedFormFilledDetail[key] = qa
-			switch len(qa.Answers) {
-			case 0:
-				formFilledOps[key] = ""
-			case 1:
-				formFilledOps[key] = qa.Answers[0]
-			default:
-				formFilledOps[key] = strings.Join(qa.Answers, ", ")
+	if session.FormScaffoldCust != nil {
+		for _, qa := range qAndA {
+			for key, docVar := range *session.FormScaffoldCust {
+				if docVar == nil {
+					continue
+				}
+				if qa.Question != docVar.Label {
+					continue
+				}
+				storedFormFilledDetail[key] = qa
+				switch len(qa.Answers) {
+				case 0:
+					formFilledOps[key] = ""
+				case 1:
+					formFilledOps[key] = qa.Answers[0]
+				default:
+					formFilledOps[key] = strings.Join(qa.Answers, ", ")
+				}
 			}
 		}
 	}
 
-	go func() {
-		// store qAndA into form_sessions.form_filled_customer as json
-		if err := docrepo.StoreFormFilledCustomer(formID, storedFormFilledDetail); err != nil {
-			slog.Error("generateDocuments: store form_filled_customer",
-				"formID", formID, "err", err)
+	// ── 2b. Fetch existing FormAnswer map, merge new answers in, persist, then
+	// build the full string map (existing + new) for document filling ──────────
+	existing, err := docrepo.FetchFormFilledCustomer(formID)
+	if err != nil {
+		slog.Warn("generateDocuments: fetch existing form_filled_customer, starting fresh",
+			"formID", formID, "err", err)
+		existing = make(map[string]conpool.FormAnswer)
+	}
+	// New answers overwrite old ones for the same key.
+	for k, v := range storedFormFilledDetail {
+		existing[k] = v
+	}
+	if err := docrepo.StoreFormFilledCustomer(formID, existing); err != nil {
+		slog.Error("generateDocuments: store form_filled_customer",
+			"formID", formID, "err", err)
+	}
+
+	slog.Info("existing:", "existing", existing)
+
+	for key, qa := range existing {
+		switch len(qa.Answers) {
+		case 0:
+			formFilledOps[key] = ""
+		case 1:
+			formFilledOps[key] = qa.Answers[0]
+		default:
+			formFilledOps[key] = strings.Join(qa.Answers, ", ")
 		}
-	}()
+	}
 
 	slog.Info("generateDocuments: variable map built",
 		"formID", formID,

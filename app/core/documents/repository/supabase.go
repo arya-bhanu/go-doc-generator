@@ -92,6 +92,117 @@ func FetchFormSession(formID string) (*documents.FormSessions, error) {
 	return &session, nil
 }
 
+// FetchFormSessionByUserID checks whether a form_sessions row already exists
+// for the given userID. Returns (session, nil) when found, (nil, nil) when no
+// row exists, and (nil, err) on a query/decode error.
+func FetchFormSessionByUserID(userID int) (*documents.FormSessions, error) {
+	var (
+		session              documents.FormSessions
+		docDetailsJSON       []byte
+		formScaffoldCustJSON []byte
+		formScaffoldOpsJSON  []byte
+	)
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT doc_details, form_link, form_scaffold_cust, form_scaffold_ops, user_id, form_id
+		 FROM form_sessions
+		 WHERE user_id = $1
+		 LIMIT 1`,
+		userID,
+	).Scan(
+		&docDetailsJSON,
+		&session.FormLink,
+		&formScaffoldCustJSON,
+		&formScaffoldOpsJSON,
+		&session.UserID,
+		&session.FormID,
+	)
+	if err != nil {
+		// pgx returns pgx.ErrNoRows when nothing is found – treat it as "not found"
+		// rather than a hard error so the caller can decide to create instead.
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("supabase: fetch form session by user_id %d: %w", userID, err)
+	}
+
+	if err := json.Unmarshal(docDetailsJSON, &session.DocDetails); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal doc_details: %w", err)
+	}
+	if err := json.Unmarshal(formScaffoldCustJSON, &session.FormScaffoldCust); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_cust: %w", err)
+	}
+	if err := json.Unmarshal(formScaffoldOpsJSON, &session.FormScaffoldOps); err != nil {
+		return nil, fmt.Errorf("supabase: unmarshal form_scaffold_ops: %w", err)
+	}
+
+	return &session, nil
+}
+
+// UpdateFormSession updates the form_link, form_scaffold_cust, doc_details, and
+// form_id columns of the form_sessions row that belongs to userID.
+func UpdateFormSession(userID int, payload documents.FormSessions) error {
+	docDetailsJSON, err := json.Marshal(payload.DocDetails)
+	if err != nil {
+		return fmt.Errorf("supabase: marshal doc_details: %w", err)
+	}
+
+	formScaffoldCustJSON, err := json.Marshal(payload.FormScaffoldCust)
+	if err != nil {
+		return fmt.Errorf("supabase: marshal form_scaffold_cust: %w", err)
+	}
+
+	_, err = database.DB.Exec(
+		context.Background(),
+		`UPDATE form_sessions
+		 SET form_link         = $1,
+		     form_scaffold_cust = $2,
+		     doc_details        = $3,
+		     form_id            = $4
+		 WHERE user_id = $5`,
+		payload.FormLink,
+		formScaffoldCustJSON,
+		docDetailsJSON,
+		payload.FormID,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("supabase: update form_sessions for user_id %d: %w", userID, err)
+	}
+
+	return nil
+}
+
+// FetchFormFilledCustomer retrieves the current form_filled_customer JSON column
+// for the form_sessions row identified by formID and decodes it into a
+// map[string]conpool.FormAnswer. Returns an empty (non-nil) map when the column
+// is NULL or the row has no data yet.
+func FetchFormFilledCustomer(formID string) (map[string]conpool.FormAnswer, error) {
+	var raw []byte
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT form_filled_customer
+		 FROM form_sessions
+		 WHERE form_id = $1
+		 LIMIT 1`,
+		formID,
+	).Scan(&raw)
+	if err != nil {
+		return nil, fmt.Errorf("supabase: fetch form_filled_customer %q: %w", formID, err)
+	}
+
+	result := make(map[string]conpool.FormAnswer)
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return nil, fmt.Errorf("supabase: unmarshal form_filled_customer: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
 // StoreFormFilledCustomer marshals qAndA to JSON and writes it into the
 // form_filled_customer column of the form_sessions row identified by formID.
 func StoreFormFilledCustomer(formID string, qAndA map[string]conpool.FormAnswer) error {
@@ -157,4 +268,30 @@ func FetchDocVariable(variable string) *documents.DocumentVariable {
 	}
 
 	return &dv
+}
+
+// FetchAnswerdCustomerForm queries the form_sessions row for the given userID
+// and returns the form_filled_customer column decoded as map[string]conpool.FormAnswer.
+// Returns nil if no matching row is found or an error occurs.
+func FetchAnswerdCustomerForm(userID int) map[string]conpool.FormAnswer {
+	var formFilledCustomerJSON []byte
+
+	err := database.DB.QueryRow(
+		context.Background(),
+		`SELECT form_filled_customer
+		 FROM form_sessions
+		 WHERE user_id = $1
+		 LIMIT 1`,
+		userID,
+	).Scan(&formFilledCustomerJSON)
+	if err != nil {
+		return nil
+	}
+
+	var result map[string]conpool.FormAnswer
+	if err := json.Unmarshal(formFilledCustomerJSON, &result); err != nil {
+		return nil
+	}
+
+	return result
 }
