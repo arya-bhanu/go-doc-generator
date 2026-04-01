@@ -261,16 +261,29 @@ func DeleteFormSessionByUserID(userID int) error {
 	return nil
 }
 
-// UpsertDocumentTemplates inserts new rows into stored_document_templates.
-// If a row with the same google_file_id already exists it is silently skipped
-// (no update, no error).
-func UpsertDocumentTemplates(templates []documents.StoredDocumentTemplate) error {
+// ReplaceDocumentTemplates replaces the entire stored_document_templates table
+// with the provided slice inside a single transaction. It first deletes all
+// existing rows, then inserts the new ones. If any insert fails the delete is
+// rolled back, leaving the table unchanged.
+func ReplaceDocumentTemplates(templates []documents.StoredDocumentTemplate) error {
+	ctx := context.Background()
+
+	tx, err := database.DB.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("supabase: begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback on any early return
+
+	_, err = tx.Exec(ctx, `DELETE FROM stored_document_templates`)
+	if err != nil {
+		return fmt.Errorf("supabase: delete stored_document_templates: %w", err)
+	}
+
 	for _, t := range templates {
-		_, err := database.DB.Exec(
-			context.Background(),
+		_, err = tx.Exec(
+			ctx,
 			`INSERT INTO stored_document_templates (google_file_id, link, title)
-			 VALUES ($1, $2, $3)
-			 ON CONFLICT (google_file_id) DO NOTHING`,
+			 VALUES ($1, $2, $3)`,
 			t.GoogleFileID,
 			t.Link,
 			t.Title,
@@ -279,6 +292,11 @@ func UpsertDocumentTemplates(templates []documents.StoredDocumentTemplate) error
 			return fmt.Errorf("supabase: insert stored_document_templates %q: %w", t.GoogleFileID, err)
 		}
 	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("supabase: commit transaction: %w", err)
+	}
+
 	return nil
 }
 

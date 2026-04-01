@@ -507,8 +507,8 @@ func (s *DocumentService) RefreshDocumentTemplates() ([]documents.StoredDocument
 		})
 	}
 
-	if err := docrepo.UpsertDocumentTemplates(templates); err != nil {
-		return nil, fmt.Errorf("refreshDocumentTemplates: upsert: %w", err)
+	if err := docrepo.ReplaceDocumentTemplates(templates); err != nil {
+		return nil, fmt.Errorf("refreshDocumentTemplates: replace: %w", err)
 	}
 
 	slog.Info("refreshDocumentTemplates: templates synced", "count", len(templates))

@@ -7,10 +7,10 @@ import (
 )
 
 type HttpResponse struct {
-	Err     string
-	Msg     string
-	Success bool
-	Data    any
+	Err     string `json:"err"`
+	Msg     string `json:"msg"`
+	Success bool   `json:"success"`
+	Data    any    `json:"data"`
 }
 
 func HttpResponseFunc(res HttpResponse) gin.H {
