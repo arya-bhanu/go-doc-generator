@@ -46,6 +46,8 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 
 	// If all customer variables are already answered (userVars is empty),
 	// skip form generation and send the filled documents directly via email.
+	// Ops variable mapping ({curly-brace} substitution) is handled inside
+	// SendDocumentsDirect using payload.UserID.
 	if len(userVars) == 0 {
 		if err = h.DocService.SendDocumentsDirect(varPayload, answeredQuestCust); err != nil {
 			slog.Error("failed to send documents directly", "err", err.Error())

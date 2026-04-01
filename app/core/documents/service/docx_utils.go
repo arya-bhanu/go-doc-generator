@@ -20,7 +20,7 @@ import (
 // Split-run handling: Word sometimes stores a single placeholder across
 // multiple <w:r> elements (e.g. &lt;NO_ in one run and HP&gt; in the next).
 // FillDocxVariables detects and handles these splits transparently.
-func FillDocxVariables(data []byte, replacements map[string]string) ([]byte, error) {
+func FillDocxVariables(data []byte, replacements map[string]string, opsReplacements map[string]string) ([]byte, error) {
 	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("fillDocx: open zip: %w", err)
@@ -49,6 +49,7 @@ func FillDocxVariables(data []byte, replacements map[string]string) ([]byte, err
 		// Only modify the main document body; leave styles, images, etc. alone.
 		if f.Name == "word/document.xml" {
 			content = replaceAngleBracketVars(content, replacements)
+			content = replaceCurlyBraceVars(content, opsReplacements)
 		}
 
 		if _, err := fw.Write(content); err != nil {
@@ -130,6 +131,65 @@ func buildSplitRunRegex(varName string) *regexp.Regexp {
 	}
 
 	pattern := seq("&lt;") + optTag + seq(varName) + optTag + seq("&gt;")
+	return regexp.MustCompile(pattern)
+}
+
+// replaceCurlyBraceVars substitutes every {VARIABLE} occurrence in xmlContent
+// with the matching value from opsReplacements (keyed by the bare variable name,
+// e.g. "nama" for a placeholder written as {nama}).
+//
+// Curly braces are not XML-entity-encoded in .docx files, so { and } appear
+// literally in the raw XML.  The split-run problem still applies — Word may
+// store {VARIABLE} across multiple <w:r> runs — so a split-run-aware regex
+// (see buildCurlyBraceSplitRunRegex) is used for each variable.
+//
+// Replacement values are XML-escaped before insertion.
+func replaceCurlyBraceVars(xmlContent []byte, opsReplacements map[string]string) []byte {
+	if len(opsReplacements) == 0 {
+		return xmlContent
+	}
+	result := string(xmlContent)
+	for varName, value := range opsReplacements {
+		if varName == "" {
+			continue
+		}
+		// Normalise: strip outer braces if the caller already included them
+		// (e.g. "{BLN}" → "BLN") so the regex always wraps exactly once.
+		bareVar := varName
+		if len(bareVar) > 2 && bareVar[0] == '{' && bareVar[len(bareVar)-1] == '}' {
+			bareVar = bareVar[1 : len(bareVar)-1]
+		}
+		re := buildCurlyBraceSplitRunRegex(bareVar)
+		result = re.ReplaceAllLiteralString(result, xmlEscapeValue(value))
+	}
+	return []byte(result)
+}
+
+// buildCurlyBraceSplitRunRegex returns a compiled regex that matches
+// {VARNAME} even when XML tags are interspersed between any of the characters.
+//
+// Curly braces are literal in XML text, but Word may split a single placeholder
+// like {nama} across multiple <w:r> runs, e.g.:
+//
+//	{na</w:t></w:r><w:r><w:t>ma}
+//
+// The pattern allows `(?:<[^>]+>)*` between every pair of consecutive characters
+// so that both the normal and split-run cases are handled correctly.
+func buildCurlyBraceSplitRunRegex(varName string) *regexp.Regexp {
+	const optTag = `(?:<[^>]+>)*`
+
+	seq := func(s string) string {
+		var sb strings.Builder
+		for i, ch := range s {
+			if i > 0 {
+				sb.WriteString(optTag)
+			}
+			sb.WriteString(regexp.QuoteMeta(string(ch)))
+		}
+		return sb.String()
+	}
+
+	pattern := seq("{") + optTag + seq(varName) + optTag + seq("}")
 	return regexp.MustCompile(pattern)
 }
 

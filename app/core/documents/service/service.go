@@ -98,6 +98,14 @@ func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, an
 		}
 	}
 
+	// Fetch ops-user's answered fields for {curly-brace} substitution —
+	// same pattern used in GenerateDocuments.
+	opsFormFilled := usersrepo.FetchOpsUserFormFilled(payload.UserID)
+	opsAnswers := make(map[string]string, len(opsFormFilled))
+	for _, field := range opsFormFilled {
+		opsAnswers[field.Variable] = field.Answer
+	}
+
 	var attachments []email.Attachment
 	var templatePaths []string
 
@@ -112,7 +120,7 @@ func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, an
 			continue
 		}
 
-		filled, err := FillDocxVariables(data, formFilledOps)
+		filled, err := FillDocxVariables(data, formFilledOps, opsAnswers)
 		if err != nil {
 			slog.Error("sendDocumentsDirect: fill variables",
 				"title", detail.DocTempTitle, "err", err)
@@ -394,6 +402,13 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 
 	slog.Info("formFilledOps:", "formFilledOps", formFilledOps)
 
+	// ── 2c. Fetch ops-user's answered fields for {curly-brace} substitution ──
+	opsFormFilled := usersrepo.FetchOpsUserFormFilled(session.UserID)
+	opsAnswers := make(map[string]string, len(opsFormFilled))
+	for _, field := range opsFormFilled {
+		opsAnswers[field.Variable] = field.Answer
+	}
+
 	// ── 3. Fill each document template, collect as email attachments ──────────
 	// Filled documents are kept in memory and attached directly to the email —
 	// they are never written back to temp/.  The original template file is
@@ -412,7 +427,7 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 			continue
 		}
 
-		filled, err := FillDocxVariables(data, formFilledOps)
+		filled, err := FillDocxVariables(data, formFilledOps, opsAnswers)
 		if err != nil {
 			slog.Error("generateDocuments: fill variables",
 				"title", detail.DocTempTitle, "err", err)

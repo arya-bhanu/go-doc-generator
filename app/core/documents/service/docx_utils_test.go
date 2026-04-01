@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -71,7 +72,7 @@ func TestFillDocxVariables_SingleRun(t *testing.T) {
 		"<NO_HP>":  "08123456789",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestFillDocxVariables_SplitRun_VarNameSplit(t *testing.T) {
 		"<NO_HP>": "08123456789",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestFillDocxVariables_SplitRun_EntitySplit(t *testing.T) {
 		"<NO_KTP>": "3171234567890001",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestFillDocxVariables_SplitRun_ThreeWaySplit(t *testing.T) {
 		"<NO_HP>": "08123456789",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestFillDocxVariables_SplitRun_WithFormatting(t *testing.T) {
 		"<NO_HP>": "08123456789",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestFillDocxVariables_XMLEscaping(t *testing.T) {
 		"<NO_HP>": `A&B<C>D"E'F`,
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestFillDocxVariables_DollarSignValue(t *testing.T) {
 		"<NO_HP>": "$100",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -242,7 +243,7 @@ func TestFillDocxVariables_InvalidKey(t *testing.T) {
 		"<NO_HP>": "08123456789",
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestFillDocxVariables_NoMatch_LeaveUnchanged(t *testing.T) {
 		"<NO_HP>": "08123456789", // different variable — should not touch NO_KTP
 	}
 
-	filled, err := FillDocxVariables(docx, replacements)
+	filled, err := FillDocxVariables(docx, replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestFillDocxVariables_NonDocumentEntries(t *testing.T) {
 		"<NO_HP>": "08123456789",
 	}
 
-	filled, err := FillDocxVariables(buf.Bytes(), replacements)
+	filled, err := FillDocxVariables(buf.Bytes(), replacements, nil)
 	if err != nil {
 		t.Fatalf("FillDocxVariables: %v", err)
 	}
@@ -316,6 +317,46 @@ func TestFillDocxVariables_NonDocumentEntries(t *testing.T) {
 	}
 	if got := results["word/styles.xml"]; got != `<a:t>&lt;NO_HP&gt;</a:t>` {
 		t.Errorf("styles.xml should be unchanged, got %q", got)
+	}
+}
+
+// TestFillDocxVariables_CurlyBrace verifies that {variable} ops placeholders
+// are replaced via the opsReplacements map.
+func TestFillDocxVariables_CurlyBrace(t *testing.T) {
+	xml := `<w:t>Nama: {nama} Jabatan: {jabatan}</w:t>`
+	docx := makeDocx(t, xml)
+
+	opsReplacements := map[string]string{
+		"nama":    "Budi Santoso",
+		"jabatan": "Manager",
+	}
+
+	filled, err := FillDocxVariables(docx, nil, opsReplacements)
+	if err != nil {
+		t.Fatalf("FillDocxVariables: %v", err)
+	}
+
+	got := extractDocXML(t, filled)
+	want := `<w:t>Nama: Budi Santoso Jabatan: Manager</w:t>`
+	if got != want {
+		t.Errorf("curly-brace replacement:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+// TestFillDocxVariables_CurlyBrace_NilOps verifies that passing nil for
+// opsReplacements leaves curly-brace placeholders untouched.
+func TestFillDocxVariables_CurlyBrace_NilOps(t *testing.T) {
+	xml := `<w:t>{nama}</w:t>`
+	docx := makeDocx(t, xml)
+
+	filled, err := FillDocxVariables(docx, nil, nil)
+	if err != nil {
+		t.Fatalf("FillDocxVariables: %v", err)
+	}
+
+	got := extractDocXML(t, filled)
+	if got != xml {
+		t.Errorf("nil ops: document should be unchanged\ngot  %s\nwant %s", got, xml)
 	}
 }
 
@@ -371,6 +412,130 @@ func TestBuildSplitRunRegex_MatchesSimple(t *testing.T) {
 				tc.input, got, tc.match)
 		}
 	}
+}
+
+// ── buildCurlyBraceSplitRunRegex ─────────────────────────────────────────────
+
+func TestBuildCurlyBraceSplitRunRegex_Matches(t *testing.T) {
+	re := buildCurlyBraceSplitRunRegex("nama")
+	cases := []struct {
+		input string
+		match bool
+	}{
+		// exact single-run
+		{"{nama}", true},
+		// split at var name
+		{"{na</w:t></w:r><w:r><w:t>ma}", true},
+		// split at opening brace
+		{"{</w:t></w:r><w:r><w:t>nama}", true},
+		// wrong variable — must not match
+		{"{jabatan}", false},
+		// partial — must not match
+		{"{nama", false},
+	}
+	for _, tc := range cases {
+		got := re.MatchString(tc.input)
+		if got != tc.match {
+			t.Errorf("buildCurlyBraceSplitRunRegex(nama).MatchString(%q) = %v, want %v",
+				tc.input, got, tc.match)
+		}
+	}
+}
+
+// ── replaceCurlyBraceVars ────────────────────────────────────────────────────
+
+func TestReplaceCurlyBraceVars_Basic(t *testing.T) {
+	xml := `<w:t>Hello {nama}, your role is {jabatan}.</w:t>`
+	opsReplacements := map[string]string{
+		"nama":    "Budi",
+		"jabatan": "Manager",
+	}
+	got := string(replaceCurlyBraceVars([]byte(xml), opsReplacements))
+	want := `<w:t>Hello Budi, your role is Manager.</w:t>`
+	if got != want {
+		t.Errorf("replaceCurlyBraceVars basic:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+func TestReplaceCurlyBraceVars_EmptyMap(t *testing.T) {
+	xml := `<w:t>{nama}</w:t>`
+	got := string(replaceCurlyBraceVars([]byte(xml), map[string]string{}))
+	if got != xml {
+		t.Errorf("empty map: want unchanged, got %s", got)
+	}
+}
+
+func TestReplaceCurlyBraceVars_XMLEscaping(t *testing.T) {
+	xml := `<w:t>{val}</w:t>`
+	opsReplacements := map[string]string{"val": `A&B<C>`}
+	got := string(replaceCurlyBraceVars([]byte(xml), opsReplacements))
+	want := `<w:t>A&amp;B&lt;C&gt;</w:t>`
+	if got != want {
+		t.Errorf("XML escaping:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+// ── replaceCurlyBraceVars — brace-normalisation ──────────────────────────────
+
+// TestReplaceCurlyBraceVars_KeysWithBraces verifies that keys supplied WITH
+// outer curly braces (e.g. "{BLN}") are normalised and still replace correctly.
+func TestReplaceCurlyBraceVars_KeysWithBraces(t *testing.T) {
+	xml := `<w:t>{BLN}</w:t>`
+	// Keys already wrapped in braces — mirrors what the real opsAnswers map
+	// looks like when Variable is stored as "{BLN}" instead of "BLN".
+	opsReplacements := map[string]string{
+		"{BLN}": "01",
+	}
+	got := string(replaceCurlyBraceVars([]byte(xml), opsReplacements))
+	want := `<w:t>01</w:t>`
+	if got != want {
+		t.Errorf("brace-wrapped key:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+// ── Real docx integration ─────────────────────────────────────────────────────
+
+// TestFillDocxVariables_RealDocx_CurlyBrace is an integration test that reads
+// the actual filled document from the temp/ folder and verifies that curly-brace
+// placeholders are replaced.  The test is skipped when the file is not present
+// so it does not break CI.
+func TestFillDocxVariables_RealDocx_CurlyBrace(t *testing.T) {
+	const docxPath = "../../../../temp/01f12da6-29b8-6f8c-b973-3a5e3c867523_filled_SURAT PERNYATAAN WIC.docx"
+
+	data, err := os.ReadFile(docxPath)
+	if err != nil {
+		t.Skipf("real docx not found — skipping integration test: %v", err)
+	}
+
+	// Dummy values matching the map the user observed:
+	// map[{BLN}:01 {KOTA}:Jakarta {TGL}:20 {THN}:2026]
+	opsReplacements := map[string]string{
+		"{BLN}":  "01",
+		"{KOTA}": "Jakarta",
+		"{TGL}":  "20",
+		"{THN}":  "2026",
+	}
+
+	filled, err := FillDocxVariables(data, nil, opsReplacements)
+	if err != nil {
+		t.Fatalf("FillDocxVariables: %v", err)
+	}
+
+	// Write the result next to the source for manual inspection.
+	outPath := "../../../../temp/test_output_curly_replaced.docx"
+	if err := os.WriteFile(outPath, filled, 0o644); err != nil {
+		t.Fatalf("write output docx: %v", err)
+	}
+	t.Logf("output written to %s", outPath)
+
+	// Verify the XML no longer contains any of the original placeholders.
+	xmlContent := extractDocXML(t, filled)
+	for _, placeholder := range []string{"{BLN}", "{KOTA}", "{TGL}", "{THN}"} {
+		if strings.Contains(xmlContent, placeholder) {
+			t.Errorf("placeholder %q was NOT replaced in the output", placeholder)
+		}
+	}
+	t.Log("all curly-brace placeholders replaced successfully")
 }
 
 // ── replaceAngleBracketVars (integration) ────────────────────────────────────
