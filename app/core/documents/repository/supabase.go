@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	"github.com/arya-bhanu/go-doc-generator/app/core/documents"
@@ -143,6 +144,8 @@ func UpdateFormSession(userID int, payload documents.FormSessions) error {
 		return fmt.Errorf("supabase: marshal form_scaffold_cust: %w", err)
 	}
 
+	slog.Info("[UpdateFormSession] docDetailsJSON: ", "docDetailsJSON", docDetailsJSON)
+
 	_, err = database.DB.Exec(
 		context.Background(),
 		`UPDATE form_sessions
@@ -213,24 +216,6 @@ func StoreFormFilledCustomer(formID string, qAndA map[string]conpool.FormAnswer)
 		return fmt.Errorf("supabase: update form_filled_customer: %w", err)
 	}
 
-	return nil
-}
-
-// ClearFormScaffoldCust sets form_scaffold_cust, form_link, and form_id to NULL
-// on the form_sessions row for the given userID.
-func ClearFormScaffoldCust(userID int) error {
-	_, err := database.DB.Exec(
-		context.Background(),
-		`UPDATE form_sessions
-		 SET form_scaffold_cust = NULL,
-		     form_link          = NULL,
-		     form_id            = NULL
-		 WHERE user_id = $1`,
-		userID,
-	)
-	if err != nil {
-		return fmt.Errorf("supabase: clear form_scaffold_cust for user_id %d: %w", userID, err)
-	}
 	return nil
 }
 

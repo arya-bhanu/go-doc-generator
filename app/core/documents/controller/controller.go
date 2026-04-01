@@ -74,9 +74,14 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 			return
 		}
 
+		// Clear form-related fields via upsert so doc_details is updated at the
+		// same time and no separate ClearFormScaffoldCust call is needed.
+		varPayload.FormLink = nil
+		varPayload.FormScaffoldCust = nil
+		varPayload.FormID = nil
 		go func() {
-			if err := h.DocService.ClearFormScaffoldCust(userID); err != nil {
-				slog.Error("failed to clear form_scaffold_cust",
+			if err := h.DocService.UpsertSession(varPayload); err != nil {
+				slog.Error("failed to upsert session after direct send",
 					"userID", userID, "err", err.Error())
 			}
 		}()

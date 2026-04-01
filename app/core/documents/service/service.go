@@ -55,12 +55,6 @@ func (s *DocumentService) CreateSession(payload documents.FormSessions) error {
 	return docrepo.CreateFormSessions(payload)
 }
 
-// ClearFormScaffoldCust nulls out form_scaffold_cust, form_link, and form_id
-// on the form_sessions row for the given userID.
-func (s *DocumentService) ClearFormScaffoldCust(userID int) error {
-	return docrepo.ClearFormScaffoldCust(userID)
-}
-
 // UpsertSession checks whether a form_sessions row already exists for the
 // payload's UserID.  If it does, it updates form_link, form_scaffold_cust,
 // doc_details, and form_id on that row.  Otherwise it creates a fresh row.
