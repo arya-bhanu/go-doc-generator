@@ -78,25 +78,17 @@ func (s *DocumentService) UpsertSession(payload documents.FormSessions) error {
 // sends them by email to the session owner. Template files are removed from
 // temp/ after dispatch, mirroring the cleanup done in GenerateDocuments.
 func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, answeredQuestCust map[string]conpool.FormAnswer) error {
-	// Build placeholder → answer string map from the existing answered questions.
+	// Convert answeredQuestCust (map[string]conpool.FormAnswer) directly to a
+	// string map for document filling — same conversion used in GenerateDocuments.
 	formFilledOps := make(map[string]string)
-	if payload.FormScaffoldCust != nil {
-		for key, docVar := range *payload.FormScaffoldCust {
-			if docVar == nil {
-				continue
-			}
-			qa, ok := answeredQuestCust[key]
-			if !ok {
-				continue
-			}
-			switch len(qa.Answers) {
-			case 0:
-				formFilledOps[key] = ""
-			case 1:
-				formFilledOps[key] = qa.Answers[0]
-			default:
-				formFilledOps[key] = strings.Join(qa.Answers, ", ")
-			}
+	for key, qa := range answeredQuestCust {
+		switch len(qa.Answers) {
+		case 0:
+			formFilledOps[key] = ""
+		case 1:
+			formFilledOps[key] = qa.Answers[0]
+		default:
+			formFilledOps[key] = strings.Join(qa.Answers, ", ")
 		}
 	}
 
