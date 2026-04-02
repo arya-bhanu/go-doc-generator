@@ -43,6 +43,23 @@ func Init(ctx context.Context) error {
 	return err
 }
 
+// GetOAuthConfig reads oauth-client-secret.json and returns a configured
+// *oauth2.Config with the standard Drive + Forms scopes.
+// The caller is responsible for setting RedirectURL before use.
+func GetOAuthConfig() (*oauth2.Config, error) {
+	oauthData, err := os.ReadFile("oauth-client-secret.json")
+	if err != nil {
+		return nil, fmt.Errorf("read oauth-client-secret.json: %w", err)
+	}
+
+	config, err := google.ConfigFromJSON(oauthData, oauthScopes...)
+	if err != nil {
+		return nil, fmt.Errorf("parse oauth config: %w", err)
+	}
+
+	return config, nil
+}
+
 // InitOAuthHTTPClient loads oauth-client-secret.json + token.json and
 // returns an *http.Client whose token is auto-refreshed — no consent
 // screen after the first run of tools/get_token/.

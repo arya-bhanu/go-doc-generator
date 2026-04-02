@@ -64,6 +64,10 @@ func registerRoutes(r *gin.Engine, handler *ctr.Handler, opsController *ops_ctr.
 	// CachedSet implements jwk.Set and is backed by the auto-refreshing cache.
 	keySet := jwk.NewCachedSet(cache, jwksURL)
 
+	// /api/admin/oauth/callback is intentionally outside the auth middleware
+	// because Google redirects the browser here without any JWT or Basic Auth.
+	r.GET("/api/admin/oauth/callback", oauthCallbackHandler)
+
 	// /api group – protected by auth middleware
 	api := r.Group("/api")
 	api.Use(AuthMiddleware(keySet, issuer))
@@ -83,6 +87,14 @@ func registerRoutes(r *gin.Engine, handler *ctr.Handler, opsController *ops_ctr.
 			ops.POST("/on-login", opsController.OnLoginOps)
 			ops.POST("/submit-form", opsController.SubmitForm)
 			ops.DELETE("/session", opsController.DeleteSession)
+		}
+
+		admin := api.Group("/admin")
+		{
+			oauth := admin.Group("/oauth")
+			{
+				oauth.GET("/authenticate", oauthAuthenticateHandler)
+			}
 		}
 	}
 }

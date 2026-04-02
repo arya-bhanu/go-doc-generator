@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" data-state="{{if .Success}}success{{else}}error{{end}}">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{.Title}}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #e0e7ff 0%, #f0f9ff 50%, #ecfdf5 100%);
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.10), 0 2px 10px rgba(0,0,0,.06);
+      padding: 56px 48px 48px;
+      text-align: center;
+      max-width: 480px;
+      width: 90%;
+      animation: fadeUp .45s cubic-bezier(.22,.68,0,1.2) both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .icon-wrap {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    .icon-wrap svg { width: 36px; height: 36px; }
+
+    /* success state */
+    [data-state="success"] .icon-wrap { background: #f0fdf4; color: #16a34a; }
+    [data-state="success"] .badge     { background: #f0fdf4; color: #16a34a; border-color: rgba(22,163,74,.13); }
+
+    /* error state */
+    [data-state="error"] .icon-wrap { background: #fef2f2; color: #dc2626; }
+    [data-state="error"] .badge     { background: #fef2f2; color: #dc2626; border-color: rgba(220,38,38,.13); }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 12px;
+      letter-spacing: -.02em;
+    }
+
+    p.detail {
+      font-size: .95rem;
+      color: #6b7280;
+      line-height: 1.65;
+      margin-bottom: 32px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: .85rem;
+      font-weight: 600;
+      margin-bottom: 32px;
+    }
+    .badge svg { width: 14px; height: 14px; }
+
+    .divider {
+      height: 1px;
+      background: #f3f4f6;
+      margin-bottom: 24px;
+    }
+
+    .footer { font-size: .8rem; color: #9ca3af; }
+
+    code {
+      background: #f3f4f6;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: .85em;
+      color: #374151;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="icon-wrap">
+      {{if .Success}}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+      {{else}}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      {{end}}
+    </div>
+
+    <h1>{{.Title}}</h1>
+    <p class="detail">{{.Detail}}</p>
+
+    <div class="badge">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      token.json
+    </div>
+
+    <div class="divider"></div>
+    <p class="footer">You may now close this tab and return to your application.</p>
+
+  </div>
+</body>
+</html>
