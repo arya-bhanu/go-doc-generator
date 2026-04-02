@@ -108,14 +108,16 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 	varPayload.FormLink = &formRes.FormLink
 	varPayload.FormID = &formRes.FormID
 
-	// If a form_session already exists for this user (matched by user_id),
-	// update form_link, form_scaffold_cust, doc_details, and form_id only.
-	// Otherwise create a new session row.
-	if err = h.DocService.UpsertSession(varPayload); err != nil {
-		slog.Error("failed to upsert session", "err", err.Error())
-		c.Error(err)
-		return
-	}
+	go func() {
+		// If a form_session already exists for this user (matched by user_id),
+		// update form_link, form_scaffold_cust, doc_details, and form_id only.
+		// Otherwise create a new session row.
+		if err = h.DocService.UpsertSession(varPayload); err != nil {
+			slog.Error("failed to upsert session", "err", err.Error())
+			c.Error(err)
+			return
+		}
+	}()
 
 	c.JSON(http.StatusOK, httpresponsewrapper.HttpResponse{Success: true, Err: "", Msg: "success create google form", Data: formRes.FormLink})
 }

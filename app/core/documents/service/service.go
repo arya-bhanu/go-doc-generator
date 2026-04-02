@@ -189,32 +189,68 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	storedCustVariables := make(map[string]*documents.DocumentVariable)
+	docsChan := make(chan docrepo.DocumentFile)
+	storedCustVariablesChan := make(chan map[string]*documents.DocumentVariable)
 	custVariables := make(map[string]*documents.DocumentVariable)
 	custVarChan := make(chan string)
-	storedUserOpsVariables := make(map[string]*documents.DocumentVariable)
+	storedUserOpsVariablesChan := make(chan map[string]*documents.DocumentVariable)
 	userOpsVariables := make(map[string]*documents.DocumentVariable)
 	userOpsVarChan := make(chan string)
 
-	for _, doc := range docs {
-		s.scanDocument(doc.Data, storedCustVariables, storedUserOpsVariables)
+	// insert into channel
+	wg.Add(1)
+	go func() {
+		defer func() {
+			close(docsChan)
+			wg.Done()
+		}()
+		for _, doc := range docs {
+			docsChan <- doc
+		}
+	}()
+
+	// proceed scanning document
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				wg.Done()
+				close(storedCustVariablesChan)
+				close(storedUserOpsVariablesChan)
+			}()
+			for doc := range docsChan {
+				s.scanDocument(doc.Data, storedCustVariablesChan, storedUserOpsVariablesChan)
+			}
+		}()
 	}
 
-	go func() {
-		defer close(custVarChan)
-		for key := range storedCustVariables {
-			custVarChan <- key
-		}
-	}()
-
-	go func() {
-		defer close(userOpsVarChan)
-		for key := range storedUserOpsVariables {
-			userOpsVarChan <- key
-		}
-	}()
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for storedCustVariables := range storedCustVariablesChan {
+				for key := range storedCustVariables {
+					custVarChan <- key
+				}
+				close(custVarChan)
+			}
+		}()
+	}
 
 	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for storedUserOpsVariables := range storedUserOpsVariablesChan {
+				for key := range storedUserOpsVariables {
+					userOpsVarChan <- key
+				}
+				close(userOpsVarChan)
+			}
+		}()
+	}
+
+	for range 6 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -270,7 +306,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 // Each unique match is stored in storedVariables as a key with a default
 // documents.DocumentVariable{} value. Existing keys are left unchanged so that
 // variables discovered earlier are not overwritten.
-func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[string]*documents.DocumentVariable, storedUserOpsVariables map[string]*documents.DocumentVariable) {
+func (s *DocumentService) scanDocument(doc []byte, storedCustVariablesChan chan map[string]*documents.DocumentVariable, storedUserOpsVariablesChan chan map[string]*documents.DocumentVariable) {
 	r, err := zip.NewReader(bytes.NewReader(doc), int64(len(doc)))
 	if err != nil {
 		return
@@ -295,17 +331,21 @@ func (s *DocumentService) scanDocument(doc []byte, storedCustVariables map[strin
 
 		// ── {variable} patterns ───────────────────────────────────────────────
 		for _, match := range curlyVarRe.FindAllString(collapsed, -1) {
+			storedUserOpsVariables := <-storedCustVariablesChan
 			if _, exists := storedUserOpsVariables[match]; !exists {
 				storedUserOpsVariables[match] = nil
 			}
+			storedUserOpsVariablesChan <- storedUserOpsVariables
 		}
 
 		// ── <variable> patterns (stored as &lt;variable&gt; inside XML) ──────
 		for _, sub := range angleVarRe.FindAllStringSubmatch(collapsed, -1) {
 			key := "<" + sub[1] + ">"
+			storedCustVariables := <-storedCustVariablesChan
 			if _, exists := storedCustVariables[key]; !exists {
 				storedCustVariables[key] = nil
 			}
+			storedCustVariablesChan <- storedCustVariables
 		}
 
 		break
