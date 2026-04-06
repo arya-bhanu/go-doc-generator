@@ -62,7 +62,7 @@ func cleanup() {
 func Start(handler *ctr.Handler, opsHandler *ops_ctr.UserOpsHandler) {
 	cleanup()
 
-	port := os.Getenv("APP_PORT")
+	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}

@@ -30,12 +30,12 @@ type callbackPageData struct {
 
 // oauthCallbackURL returns the redirect URL that Google will use after the
 // user grants (or denies) access.  It is derived from APP_BASE_URL when set,
-// otherwise constructed from APP_PORT (default 8080).
+// otherwise constructed from PORT (default 8080).
 func oauthCallbackURL() string {
 	if base := os.Getenv("APP_BASE_URL"); base != "" {
 		return base + "/api/admin/oauth/callback"
 	}
-	port := os.Getenv("APP_PORT")
+	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
