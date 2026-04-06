@@ -59,8 +59,6 @@ func AuthMiddleware(keySet jwk.Set, issuer string) gin.HandlerFunc {
 			return
 		}
 
-		slog.Info("creds", "user", creds[0], "pass", creds[1])
-
 		expectedUsername := os.Getenv("BASIC_AUTH_USERNAME")
 		expectedPassword := os.Getenv("BASIC_AUTH_PASSWORD")
 

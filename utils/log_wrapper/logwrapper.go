@@ -56,6 +56,13 @@ func Init() {
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, opts)
 
+	// Only write to store.log when APP_ENV=local
+	if os.Getenv("APP_ENV") != "local" {
+		slog.SetDefault(slog.New(jsonHandler))
+		slog.Info("Logger initialized (stdout only)", "app_env", os.Getenv("APP_ENV"))
+		return
+	}
+
 	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		slog.SetDefault(slog.New(jsonHandler))
@@ -69,5 +76,5 @@ func Init() {
 		handlers: []slog.Handler{jsonHandler, textHandler},
 	}))
 
-	slog.Info("Logger initialized", "log_file", logFile)
+	slog.Info("Logger initialized", "log_file", logFile, "app_env", "local")
 }

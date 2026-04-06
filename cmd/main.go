@@ -38,12 +38,11 @@ var (
 
 func main() {
 
-	logwrapper.Init()
-
 	if err := godotenv.Load(); err != nil {
 		slog.Warn("No .env file found, using system environment variables", "error", err)
-		return
 	}
+
+	logwrapper.Init()
 
 	db := database.Connect(ctx)
 	defer database.Close()

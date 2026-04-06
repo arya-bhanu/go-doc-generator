@@ -38,6 +38,7 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 	docIDSChan := make(chan string)
 
 	var g errgroup.Group
+	var workerWG sync.WaitGroup
 
 	go func() {
 		defer close(docIDSChan)
@@ -47,8 +48,9 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 	}()
 
 	for range 5 {
-		defer close(resultChan)
+		workerWG.Add(1)
 		g.Go(func() error {
+			defer workerWG.Done()
 			for id := range docIDSChan {
 				meta, err := r.svc.Files.Get(id).Fields("name").Do()
 				if err != nil {
@@ -83,16 +85,18 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 		})
 	}
 
-	g.Go(func() error {
-		for res := range resultChan {
-			if res.DocID != "" {
-				mu.Lock()
-				result = append(result, res)
-				mu.Unlock()
-			}
+	go func() {
+		workerWG.Wait()
+		close(resultChan)
+	}()
+
+	for res := range resultChan {
+		if res.DocID != "" {
+			mu.Lock()
+			result = append(result, res)
+			mu.Unlock()
 		}
-		return nil
-	})
+	}
 
 	if err := g.Wait(); err != nil {
 		return nil, err

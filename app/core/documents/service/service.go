@@ -175,6 +175,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 		return nil, answeredQuestCust, documents.FormSessions{}, err
 	}
 
+	slog.Info("docIDs: ", "docIDs", docIDs)
 	slog.Info("fetchDocumentTemplates: ", "fetchDocumentTemplates", docs)
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
