@@ -56,6 +56,7 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		return
 	}
 
+	slog.Info("h.DocService.ProcessDocuments")
 	userVars, answeredQuestCust, varPayload, err := h.DocService.ProcessDocuments(c, payload.DocIDS)
 	if err != nil {
 		slog.Error("failed to process documents", "err", err.Error())
@@ -97,6 +98,8 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 
 	// GENERATE GOOGLE FORM IF ONLY userVars is not an empty map
 	// this will generate a google form using google form API service
+
+	slog.Info("h.FormService.GenerateGoogleForm")
 	formRes, err := h.FormService.GenerateGoogleForm(c.Request.Context(), formconst.FormCustTitle, userVars)
 	if err != nil {
 		slog.Error("failed to generate google form", "err", err.Error())
@@ -112,6 +115,7 @@ func (h *Handler) CreateGoogleFormController(c *gin.Context) {
 		// If a form_session already exists for this user (matched by user_id),
 		// update form_link, form_scaffold_cust, doc_details, and form_id only.
 		// Otherwise create a new session row.
+		slog.Info("h.FormService.UpsertSession")
 		if err = h.DocService.UpsertSession(varPayload); err != nil {
 			slog.Error("failed to upsert session", "err", err.Error())
 			c.Error(err)

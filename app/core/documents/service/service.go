@@ -32,9 +32,6 @@ var (
 	// e.g.  &lt;NO_H</w:t>\n  <w:t>P&gt;  →  &lt;NO_HP&gt;
 	xmlTagRe = regexp.MustCompile(`\s*<[^>]+>\s*`)
 
-	// curlyVarRe matches {variable} in the collapsed plain-text content.
-	curlyVarRe = regexp.MustCompile(`\{([^}]+)\}`)
-
 	// angleVarRe matches <variable> patterns after XML tags have been stripped.
 	// The &lt; / &gt; entities remain in the collapsed text, so we still look for
 	// them — but now across run boundaries. Only pure alphanumeric identifiers
@@ -171,11 +168,14 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	userOps := userctx.(users.UserOps)
 
 	answeredQuestCust = repository.FetchAnswerdCustomerForm(userOps.ID)
+	slog.Info("answeredQuestCust: ", "answeredQuestCust", answeredQuestCust)
 
 	docs, err := s.fetchDocumentTemplates(docIDs)
 	if err != nil {
 		return nil, answeredQuestCust, documents.FormSessions{}, err
 	}
+
+	slog.Info("fetchDocumentTemplates: ", "fetchDocumentTemplates", docs)
 
 	docDetails := make([]documents.DocumentDetail, len(docs))
 	for i, doc := range docs {
@@ -187,22 +187,21 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	}
 
 	var wg sync.WaitGroup
+	var scannerWG sync.WaitGroup
+
 	var mu sync.Mutex
+	var scanMu sync.Mutex
 
 	docsChan := make(chan docrepo.DocumentFile)
-	storedCustVariablesChan := make(chan map[string]*documents.DocumentVariable)
+	storedCustVariables := make(map[string]*documents.DocumentVariable)
 	custVariables := make(map[string]*documents.DocumentVariable)
 	custVarChan := make(chan string)
-	storedUserOpsVariablesChan := make(chan map[string]*documents.DocumentVariable)
-	userOpsVariables := make(map[string]*documents.DocumentVariable)
-	userOpsVarChan := make(chan string)
 
 	// insert into channel
-	wg.Add(1)
 	go func() {
 		defer func() {
 			close(docsChan)
-			wg.Done()
+			slog.Info("docsChan closed")
 		}()
 		for _, doc := range docs {
 			docsChan <- doc
@@ -211,44 +210,27 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 
 	// proceed scanning document
 	for range 3 {
-		wg.Add(1)
+		scannerWG.Add(1)
 		go func() {
-			defer func() {
-				wg.Done()
-				close(storedCustVariablesChan)
-				close(storedUserOpsVariablesChan)
-			}()
+			defer scannerWG.Done()
 			for doc := range docsChan {
-				s.scanDocument(doc.Data, storedCustVariablesChan, storedUserOpsVariablesChan)
+				s.scanDocument(&scanMu, doc.Data, storedCustVariables)
 			}
 		}()
 	}
+	slog.Info("waiting for scannerWG.Wait()")
+	scannerWG.Wait()
 
-	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for storedCustVariables := range storedCustVariablesChan {
-				for key := range storedCustVariables {
-					custVarChan <- key
-				}
-				close(custVarChan)
-			}
+	wg.Add(1)
+	go func() {
+		defer func() {
+			wg.Done()
+			close(custVarChan)
 		}()
-	}
-
-	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for storedUserOpsVariables := range storedUserOpsVariablesChan {
-				for key := range storedUserOpsVariables {
-					userOpsVarChan <- key
-				}
-				close(userOpsVarChan)
-			}
-		}()
-	}
+		for storedCustVariables := range storedCustVariables {
+			custVarChan <- storedCustVariables
+		}
+	}()
 
 	for range 6 {
 		wg.Add(1)
@@ -262,21 +244,6 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 				mu.Lock()
 				if res != nil {
 					custVariables[key] = res
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-
-	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for key := range userOpsVarChan {
-				res := repository.FetchDocVariable(key)
-				mu.Lock()
-				if res != nil {
-					userOpsVariables[key] = res
 				}
 				mu.Unlock()
 			}
@@ -306,7 +273,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 // Each unique match is stored in storedVariables as a key with a default
 // documents.DocumentVariable{} value. Existing keys are left unchanged so that
 // variables discovered earlier are not overwritten.
-func (s *DocumentService) scanDocument(doc []byte, storedCustVariablesChan chan map[string]*documents.DocumentVariable, storedUserOpsVariablesChan chan map[string]*documents.DocumentVariable) {
+func (s *DocumentService) scanDocument(scanMu *sync.Mutex, doc []byte, storedCustVariables map[string]*documents.DocumentVariable) {
 	r, err := zip.NewReader(bytes.NewReader(doc), int64(len(doc)))
 	if err != nil {
 		return
@@ -329,23 +296,14 @@ func (s *DocumentService) scanDocument(doc []byte, storedCustVariablesChan chan 
 
 		collapsed := xmlTagRe.ReplaceAllString(string(xmlData), "")
 
-		// ── {variable} patterns ───────────────────────────────────────────────
-		for _, match := range curlyVarRe.FindAllString(collapsed, -1) {
-			storedUserOpsVariables := <-storedCustVariablesChan
-			if _, exists := storedUserOpsVariables[match]; !exists {
-				storedUserOpsVariables[match] = nil
-			}
-			storedUserOpsVariablesChan <- storedUserOpsVariables
-		}
-
 		// ── <variable> patterns (stored as &lt;variable&gt; inside XML) ──────
 		for _, sub := range angleVarRe.FindAllStringSubmatch(collapsed, -1) {
 			key := "<" + sub[1] + ">"
-			storedCustVariables := <-storedCustVariablesChan
+			scanMu.Lock()
 			if _, exists := storedCustVariables[key]; !exists {
 				storedCustVariables[key] = nil
 			}
-			storedCustVariablesChan <- storedCustVariables
+			scanMu.Unlock()
 		}
 
 		break
