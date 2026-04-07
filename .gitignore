@@ -5,3 +5,4 @@ vendor
 temp
 oauth-client-secret.json
 token.json
+/bin
