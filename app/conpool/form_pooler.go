@@ -23,17 +23,53 @@ type FormResponseResult struct {
 	Answers     []FormAnswer `json:"answers"`
 }
 
+const (
+	initMaxRetries    = 5
+	initRetryInterval = 3 * time.Second
+	initQueryTimeout  = 10 * time.Second
+)
+
 // FetchFormIDInit is called once at startup.  It queries the form_sessions
 // table for every non-empty form_id and loads them into the in-memory map
 // so the watcher covers forms that were created before this process started.
+// It retries up to initMaxRetries times with a timeout per attempt so that a
+// slow or temporarily unavailable database does not block the caller forever.
 func FetchFormIDInit() {
+	for attempt := 1; attempt <= initMaxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), initQueryTimeout)
+		err := fetchAndLoadFormIDs(ctx)
+		cancel()
+
+		if err == nil {
+			return
+		}
+
+		slog.Error("conpool: fetch form IDs init failed",
+			"attempt", attempt,
+			"maxRetries", initMaxRetries,
+			"err", err,
+		)
+
+		if attempt < initMaxRetries {
+			slog.Info("conpool: retrying form ID fetch", "backoff", initRetryInterval)
+			time.Sleep(initRetryInterval)
+		}
+	}
+
+	slog.Warn("conpool: gave up fetching initial form IDs – watcher will rely on live DB polls",
+		"maxRetries", initMaxRetries,
+	)
+}
+
+// fetchAndLoadFormIDs performs a single attempt to query and populate storeFormID.
+// It is called exclusively from FetchFormIDInit (single-threaded at startup).
+func fetchAndLoadFormIDs(ctx context.Context) error {
 	rows, err := database.DB.Query(
-		context.Background(),
+		ctx,
 		`SELECT form_id FROM form_sessions WHERE form_id IS NOT NULL AND form_id != ''`,
 	)
 	if err != nil {
-		slog.Error("conpool: fetch form IDs init", "err", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
@@ -43,11 +79,15 @@ func FetchFormIDInit() {
 			slog.Error("conpool: scan form ID", "err", err)
 			continue
 		}
-		// Direct map write – FetchFormIDInit runs before StartPooler (single-threaded).
 		storeFormID[formID] = struct{}{}
 	}
 
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
 	slog.Info("conpool: form IDs loaded", "count", len(storeFormID))
+	return nil
 }
 
 // DeleteFormID removes a form session from the database AND from the

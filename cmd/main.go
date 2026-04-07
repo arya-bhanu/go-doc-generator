@@ -110,7 +110,7 @@ func main() {
 	// responses are missed on the very first poll tick.
 	conpool.Init(gformService)
 	conpool.SetResponseHandler(docService.GenerateDocuments)
-	conpool.StartPooler()
+	go conpool.StartPooler()
 
 	handler := ctr.NewHandler(docService, formService)
 	opsHandler := ops_ctr.NewController()

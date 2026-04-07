@@ -1,19 +1,28 @@
 package conpool
 
 import (
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"google.golang.org/api/forms/v1"
 )
 
-const defaultPollInterval = 5 * time.Second
+func defaultPollInterval() time.Duration {
+	if v := os.Getenv("POLL_INTERVAL_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 5 * time.Second
+}
 
 var (
 	storeFormID  map[string]any
 	mu           sync.RWMutex
 	formsSvc     *forms.Service
-	pollInterval = defaultPollInterval
+	pollInterval = defaultPollInterval()
 
 	// responseHandler is called once per new (previously-unseen) form response.
 	// Register it with SetResponseHandler before calling StartPooler.

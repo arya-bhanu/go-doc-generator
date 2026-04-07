@@ -5,7 +5,6 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
@@ -19,7 +18,7 @@ type DriveFileInfo struct {
 }
 
 type GDriveRepository interface {
-	FetchDocuments(docIDs []string) ([]DocumentFile, error)
+	FetchDocuments(docIDs []string, docFilechan chan<- DocumentFile) error
 	ListFolderDocuments(folderID string) ([]DriveFileInfo, error)
 }
 
@@ -31,14 +30,10 @@ func NewGDriveRepo(svc *drive.Service) *GDriveRepo {
 	return &GDriveRepo{svc: svc}
 }
 
-func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
-	var mu sync.Mutex
-	result := make([]DocumentFile, 0, len(docIDs))
-	resultChan := make(chan DocumentFile)
+func (r *GDriveRepo) FetchDocuments(docIDs []string, docFilechan chan<- DocumentFile) error {
 	docIDSChan := make(chan string)
 
 	var g errgroup.Group
-	var workerWG sync.WaitGroup
 
 	go func() {
 		defer close(docIDSChan)
@@ -48,9 +43,7 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 	}()
 
 	for range 5 {
-		workerWG.Add(1)
 		g.Go(func() error {
-			defer workerWG.Done()
 			for id := range docIDSChan {
 				meta, err := r.svc.Files.Get(id).Fields("name").Do()
 				if err != nil {
@@ -79,30 +72,13 @@ func (r *GDriveRepo) FetchDocuments(docIDs []string) ([]DocumentFile, error) {
 					return err
 				}
 
-				resultChan <- DocumentFile{Title: title, Data: data, DocID: id, OriginalTitle: baseName}
+				docFilechan <- DocumentFile{Title: title, Data: data, DocID: id, OriginalTitle: baseName}
 			}
 			return nil
 		})
 	}
 
-	go func() {
-		workerWG.Wait()
-		close(resultChan)
-	}()
-
-	for res := range resultChan {
-		if res.DocID != "" {
-			mu.Lock()
-			result = append(result, res)
-			mu.Unlock()
-		}
-	}
-
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return g.Wait()
 }
 
 func (r *GDriveRepo) ListFolderDocuments(folderID string) ([]DriveFileInfo, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/arya-bhanu/go-doc-generator/app/conpool"
 	"github.com/arya-bhanu/go-doc-generator/app/core/documents"
@@ -143,8 +142,6 @@ func UpdateFormSession(userID int, payload documents.FormSessions) error {
 	if err != nil {
 		return fmt.Errorf("supabase: marshal form_scaffold_cust: %w", err)
 	}
-
-	slog.Info("[UpdateFormSession] docDetailsJSON: ", "docDetailsJSON", docDetailsJSON)
 
 	_, err = database.DB.Exec(
 		context.Background(),

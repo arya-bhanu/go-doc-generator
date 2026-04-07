@@ -124,7 +124,6 @@ func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, an
 			Filename: outTitle,
 			Data:     filled,
 		})
-		slog.Info("sendDocumentsDirect: document filled", "title", outTitle)
 	}
 
 	if len(attachments) == 0 {
@@ -154,12 +153,13 @@ func (s *DocumentService) SendDocumentsDirect(payload documents.FormSessions, an
 	return nil
 }
 
-func (s *DocumentService) fetchDocumentTemplates(docIDs []string) ([]docrepo.DocumentFile, error) {
-	return s.GDriveRepo.FetchDocuments(docIDs)
+func (s *DocumentService) fetchDocumentTemplates(docIDs []string, docFilechan chan<- repository.DocumentFile) error {
+	return s.GDriveRepo.FetchDocuments(docIDs, docFilechan)
 }
 
 func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map[string]*documents.DocumentVariable, map[string]conpool.FormAnswer, documents.FormSessions, error) {
 	var answeredQuestCust map[string]conpool.FormAnswer
+	docsChan := make(chan docrepo.DocumentFile)
 	userctx, exist := c.Get(constants.UserOpsContextKey)
 	if !exist {
 		return nil, answeredQuestCust, documents.FormSessions{}, errors.New("user not exist")
@@ -168,46 +168,27 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 	userOps := userctx.(users.UserOps)
 
 	answeredQuestCust = repository.FetchAnswerdCustomerForm(userOps.ID)
-	slog.Info("answeredQuestCust: ", "answeredQuestCust", answeredQuestCust)
 
-	docs, err := s.fetchDocumentTemplates(docIDs)
-	if err != nil {
-		return nil, answeredQuestCust, documents.FormSessions{}, err
-	}
+	go func() {
+		defer close(docsChan)
+		s.fetchDocumentTemplates(docIDs, docsChan)
+	}()
 
-	slog.Info("docIDs: ", "docIDs", docIDs)
-	slog.Info("fetchDocumentTemplates: ", "fetchDocumentTemplates", docs)
+	// if err != nil {
+	// 	return nil, answeredQuestCust, documents.FormSessions{}, err
+	// }
 
-	docDetails := make([]documents.DocumentDetail, len(docs))
-	for i, doc := range docs {
-		docDetails[i] = documents.DocumentDetail{
-			DocTempTitle:  doc.Title,
-			DocID:         docIDs[i],
-			OriginalTitle: doc.OriginalTitle,
-		}
-	}
+	docDetails := make([]documents.DocumentDetail, 0)
 
 	var wg sync.WaitGroup
 	var scannerWG sync.WaitGroup
 
 	var mu sync.Mutex
+	var muDocDetail sync.Mutex
 	var scanMu sync.Mutex
 
-	docsChan := make(chan docrepo.DocumentFile)
 	storedCustVariables := make(map[string]*documents.DocumentVariable)
 	custVariables := make(map[string]*documents.DocumentVariable)
-	custVarChan := make(chan string)
-
-	// insert into channel
-	go func() {
-		defer func() {
-			close(docsChan)
-			slog.Info("docsChan closed")
-		}()
-		for _, doc := range docs {
-			docsChan <- doc
-		}
-	}()
 
 	// proceed scanning document
 	for range 3 {
@@ -216,39 +197,38 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 			defer scannerWG.Done()
 			for doc := range docsChan {
 				s.scanDocument(&scanMu, doc.Data, storedCustVariables)
+				muDocDetail.Lock()
+				docDetails = append(docDetails, documents.DocumentDetail{
+					DocTempTitle:  doc.Title,
+					DocID:         doc.DocID,
+					OriginalTitle: doc.OriginalTitle,
+				})
+				muDocDetail.Unlock()
 			}
 		}()
 	}
-	slog.Info("waiting for scannerWG.Wait()")
+
 	scannerWG.Wait()
 
-	wg.Add(1)
-	go func() {
-		defer func() {
-			wg.Done()
-			close(custVarChan)
-		}()
-		for storedCustVariables := range storedCustVariables {
-			custVarChan <- storedCustVariables
+	sem := make(chan struct{}, 6)
+	for key := range storedCustVariables {
+		if _, ok := answeredQuestCust[key]; ok {
+			continue
 		}
-	}()
-
-	for range 6 {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for key := range custVarChan {
-				if _, ok := answeredQuestCust[key]; ok {
-					continue
-				}
-				res := repository.FetchDocVariable(key)
-				mu.Lock()
-				if res != nil {
-					custVariables[key] = res
-				}
-				mu.Unlock()
+		sem <- struct{}{}
+		go func(key string) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			res := repository.FetchDocVariable(key)
+			mu.Lock()
+			if res != nil {
+				custVariables[key] = res
 			}
-		}()
+			mu.Unlock()
+		}(key)
 	}
 
 	wg.Wait()
@@ -260,7 +240,7 @@ func (s *DocumentService) ProcessDocuments(c *gin.Context, docIDs []string) (map
 		UserID:           userOps.ID,
 	}
 
-	return custVariables, answeredQuestCust, payload, err
+	return custVariables, answeredQuestCust, payload, nil
 }
 
 // scanDocument scans the raw .docx bytes for template variable placeholders.
@@ -375,8 +355,6 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 			"formID", formID, "err", err)
 	}
 
-	slog.Info("existing:", "existing", existing)
-
 	for key, qa := range existing {
 		switch len(qa.Answers) {
 		case 0:
@@ -392,8 +370,6 @@ func (s *DocumentService) GenerateDocuments(formID string, qAndA []conpool.FormA
 		"formID", formID,
 		"variables", len(formFilledOps),
 	)
-
-	slog.Info("formFilledOps:", "formFilledOps", formFilledOps)
 
 	// ── 2c. Fetch ops-user's answered fields for {curly-brace} substitution ──
 	opsFormFilled := usersrepo.FetchOpsUserFormFilled(session.UserID)

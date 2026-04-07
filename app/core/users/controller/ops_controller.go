@@ -61,15 +61,9 @@ func (h *UserOpsHandler) OnLoginOps(c *gin.Context) {
 
 	userVariables := service.FetchOpsField()
 
-	slog.Info("userVariables: ", "userVariables", userVariables)
-
 	defaultField := service.CleanOpsField(userVariables)
 
-	slog.Info("defaultField: ", "defaultField", defaultField)
-
 	existingField := service.FetchExistingAnsweredOpsFieldForm(userID)
-
-	slog.Info("existingField: ", "existingField", existingField)
 
 	// Merge previously answered values into the default field map.
 	for key := range defaultField {
